@@ -1,0 +1,72 @@
+version: "1.1.0"
+created: "2026-04-07"
+author: "platform-team"
+changelog: |
+  - Added runtime input for stage template version
+  - Enables testing different stage template versions without changing pipeline template
+  - Backward compatible: defaults to v1.0.0 stage template
+status: "stable"
+breaking_changes: false
+
+description: |
+  Enhanced CI pipeline template with flexible stage template versioning.
+
+  NEW in v1.1.0:
+  - Stage template version is now a runtime input variable
+  - Allows independent testing and rollout of stage template changes
+  - Default stage template version: v1.0.0 (backward compatible)
+
+  Features:
+  - Code checkout and dependency installation
+  - Automated testing with JUnit report integration
+  - Docker image build and push
+  - Artifact publishing to registry
+  - Automatic deployment to dev environment
+  - **Configurable stage template version**
+
+  Runtime Inputs:
+  - connectorRef: Git connector for code checkout
+  - repoName: Repository name
+  - build: Build configuration (branch/tag/PR)
+  - service_name: Name of the service
+  - image_repo: Docker registry repository
+  - image_tag: Image tag/version
+  - **stage_template_version**: Version of deploy stage template (NEW!)
+
+compatibility:
+  harness_version: ">=1.0.0"
+  stage_template_versions:
+    - v1.0.0
+    - v1.1.0
+  required_connectors:
+    - Docker registry connector
+    - Git connector
+
+usage_example: |
+  # Using default stage template version (v1.0.0)
+  pipeline:
+    template:
+      templateRef: ci_pipeline
+      versionLabel: v1.1.0
+      templateInputs:
+        # stage_template_version not specified, defaults to v1.0.0
+
+  # Testing new stage template version (v1.1.0)
+  pipeline:
+    template:
+      templateRef: ci_pipeline
+      versionLabel: v1.1.0
+      templateInputs:
+        variables:
+          - name: stage_template_version
+            value: v1.1.0  # Override to test new version
+
+migration_notes: |
+  Existing pipelines using ci_pipeline v1.0.0 can upgrade to v1.1.0 without changes.
+  The stage template version defaults to v1.0.0, maintaining backward compatibility.
+
+  To test new stage template versions:
+  1. Deploy ci_pipeline v1.1.0
+  2. Override stage_template_version in pipeline template inputs
+  3. Monitor and validate
+  4. Roll out gradually by updating stage_template_version input

@@ -1,0 +1,118 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+.terraform.lock.hcl
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+terraform.rc
+.terraformrc
+
+# Terraform variable files
+# Uncomment if you want to ignore all .tfvars files
+# *.tfvars
+# *.tfvars.json
+
+# Sensitive data - always ignore
+secrets.tfvars
+*.secret
+*.secrets
+
+# Environment-specific overrides
+*.local.tfvars
+local.tfvars
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+*.backup
+
+# Test outputs
+test-results/
+.pytest_cache/
+__pycache__/
+*.pyc
+
+# Package managers
+node_modules/
+.npm/
+.yarn/
+
+# OS generated files
+.directory
+
+# Editor backups
+*~
+*.orig
+
+# Harness specific (if any local caches)
+.harness-cache/
+
+# Custom ignores for this project
+# Uncomment if needed
+# archived/

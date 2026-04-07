@@ -1,0 +1,55 @@
+# Standalone Test Pipeline for Stage Template
+# This pipeline tests stage template independently without using pipeline template
+
+pipeline:
+  identifier: stage_template_test
+  name: Stage Template Test Pipeline
+  projectIdentifier: <+input>
+  orgIdentifier: <+input>
+  stages:
+    - stage:
+        name: Test Deploy Stage
+        identifier: test_deploy
+        description: Testing stage template version <+pipeline.variables.stage_version>
+        template:
+          templateRef: deploy_stage
+          versionLabel: <+pipeline.variables.stage_version>
+          templateInputs:
+            type: Deployment
+            spec:
+              service:
+                serviceRef: <+pipeline.variables.test_service>
+                serviceInputs:
+                  serviceDefinition:
+                    type: Kubernetes
+                    spec:
+                      artifacts:
+                        primary:
+                          primaryArtifactRef: <+input>
+                          sources: <+input>
+              environment:
+                environmentRef: dev
+                deployToAll: false
+                infrastructureDefinitions:
+                  - identifier: dev_k8s
+            variables:
+              - name: environment
+                type: String
+                value: dev
+              - name: service_name
+                type: String
+                value: <+pipeline.variables.test_service>
+  variables:
+    - name: stage_version
+      type: String
+      description: Stage template version to test
+      required: true
+      value: <+input>.default("v1.0.0")
+    - name: test_service
+      type: String
+      description: Test service name
+      required: true
+      value: <+input>.default("test-service")
+  tags:
+    Purpose: Testing
+    Type: StandaloneStageTest

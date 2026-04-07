@@ -1,0 +1,200 @@
+# Template Validation Test Cases
+# Define test scenarios for validating template functionality
+
+test_cases:
+  stage_template:
+    - name: "Basic deployment test"
+      description: "Verify stage template can deploy a simple service"
+      template: "deploy_stage"
+      version: "v1.0.0"
+      inputs:
+        serviceRef: "test-service"
+        environmentRef: "dev"
+        environment: "dev"
+        service_name: "test-service"
+      expected_outcome: "success"
+      validation_steps:
+        - "Check deployment starts successfully"
+        - "Verify all steps execute in order"
+        - "Confirm no errors in logs"
+        - "Validate rollback plan exists"
+
+    - name: "Production approval gate test"
+      description: "Verify approval step triggers for prod deployments"
+      template: "deploy_stage"
+      version: "v1.0.0"
+      inputs:
+        serviceRef: "test-service"
+        environmentRef: "prod"
+        environment: "prod"
+        service_name: "test-service"
+      expected_outcome: "awaiting_approval"
+      validation_steps:
+        - "Deployment pauses at approval step"
+        - "Approval notification sent"
+        - "Pipeline can be approved/rejected"
+
+    - name: "Rollback test"
+      description: "Verify rollback functionality works"
+      template: "deploy_stage"
+      version: "v1.0.0"
+      setup:
+        - "Deploy initial version successfully"
+        - "Trigger deployment failure"
+      expected_outcome: "rolled_back"
+      validation_steps:
+        - "Rollback step executes automatically"
+        - "Previous state restored"
+        - "Error logged appropriately"
+
+  pipeline_template:
+    - name: "Full CI/CD pipeline test"
+      description: "Run complete pipeline from build to deploy"
+      template: "ci_pipeline"
+      version: "v1.0.0"
+      inputs:
+        connectorRef: "test-git-connector"
+        repoName: "test-repo"
+        service_name: "test-service"
+        image_repo: "test/repo"
+        image_tag: "test-123"
+      expected_outcome: "success"
+      validation_steps:
+        - "Build stage completes"
+        - "Tests run and pass"
+        - "Docker image built and pushed"
+        - "Deployment to dev succeeds"
+
+    - name: "Build failure handling"
+      description: "Verify pipeline handles build failures gracefully"
+      template: "ci_pipeline"
+      version: "v1.0.0"
+      setup:
+        - "Configure repo with failing tests"
+      expected_outcome: "failed"
+      validation_steps:
+        - "Pipeline fails at test stage"
+        - "Later stages do not execute"
+        - "Error message is clear"
+        - "No partial deployments occur"
+
+    - name: "Template inputs validation"
+      description: "Verify template requires all necessary inputs"
+      template: "ci_pipeline"
+      version: "v1.0.0"
+      inputs:
+        # Missing required inputs intentionally
+        service_name: "test-service"
+      expected_outcome: "validation_error"
+      validation_steps:
+        - "Pipeline creation fails"
+        - "Error indicates missing inputs"
+
+# Integration test scenarios
+integration_tests:
+  - name: "Template version upgrade"
+    description: "Test upgrading pipelines from v1.0.0 to v1.1.0"
+    steps:
+      - "Deploy pipelines with v1.0.0"
+      - "Run pipelines to establish baseline"
+      - "Promote to v1.1.0 for canary tier"
+      - "Run canary pipelines with new version"
+      - "Compare metrics (success rate, duration)"
+      - "Verify backward compatibility"
+    success_criteria:
+      - "All canary pipelines execute successfully"
+      - "No breaking changes detected"
+      - "Performance within acceptable range"
+
+  - name: "Multi-tier promotion"
+    description: "Test phased promotion across all tiers"
+    steps:
+      - "Promote v1.1.0 to canary"
+      - "Observe for 24 hours"
+      - "Validate success metrics"
+      - "Promote to early adopters"
+      - "Observe for 72 hours"
+      - "Validate success metrics"
+      - "Promote to stable"
+    success_criteria:
+      - "Each tier promotion succeeds"
+      - "No degradation in pipeline success rate"
+      - "No increase in execution time"
+
+  - name: "Emergency rollback"
+    description: "Test emergency rollback procedure"
+    steps:
+      - "Deploy problematic template version"
+      - "Detect issues in canary tier"
+      - "Execute rollback script"
+      - "Verify all pipelines restored"
+    success_criteria:
+      - "Rollback completes in < 5 minutes"
+      - "All pipelines return to previous version"
+      - "No data loss or corruption"
+
+# Performance benchmarks
+performance_benchmarks:
+  - metric: "pipeline_execution_time"
+    stage_template:
+      baseline: "10m"
+      threshold: "+20%"
+    pipeline_template:
+      baseline: "15m"
+      threshold: "+20%"
+
+  - metric: "success_rate"
+    stage_template:
+      baseline: "98%"
+      threshold: "-5%"
+    pipeline_template:
+      baseline: "95%"
+      threshold: "-5%"
+
+  - metric: "resource_usage"
+    stage_template:
+      cpu_baseline: "1 core"
+      memory_baseline: "2GB"
+      threshold: "+50%"
+
+# Validation checklist for new template versions
+version_checklist:
+  - item: "All YAML files are valid"
+    automated: true
+    script: "validate.sh"
+
+  - item: "Terraform configuration is valid"
+    automated: true
+    script: "terraform validate"
+
+  - item: "Version metadata is updated"
+    automated: true
+    script: "validate.sh"
+
+  - item: "Breaking changes are documented"
+    automated: false
+    reviewer: "template_owner"
+
+  - item: "Changelog is updated"
+    automated: false
+    reviewer: "template_owner"
+
+  - item: "Test cases pass in dev environment"
+    automated: true
+    script: "run_tests.sh dev"
+
+  - item: "Security scan completed"
+    automated: true
+    script: "security_scan.sh"
+
+  - item: "Performance benchmarks met"
+    automated: true
+    script: "benchmark.sh"
+
+  - item: "Documentation updated"
+    automated: false
+    reviewer: "technical_writer"
+
+  - item: "Approval from template owner"
+    automated: false
+    reviewer: "template_owner"
