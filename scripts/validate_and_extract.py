@@ -213,8 +213,14 @@ def validate_execution(
 
     logger.info("✓ Retrieved pipeline YAML")
 
-    # Check if template is used in pipeline
-    if template_id not in pipeline_yaml_str:
+    # Check if template is used in pipeline (case-insensitive)
+    if template_id.lower() not in pipeline_yaml_str.lower():
+        # Debug: show what templates ARE in the YAML
+        import re
+        template_refs = re.findall(r'templateRef:\s*["\']?(\w+)["\']?', pipeline_yaml_str)
+        logger.error(f"Template '{template_id}' not found in pipeline YAML")
+        logger.error(f"Templates found in pipeline: {template_refs}")
+        logger.error(f"Pipeline YAML snippet: {pipeline_yaml_str[:500]}")
         raise ValueError(f"Template '{template_id}' not found in pipeline YAML")
 
     logger.info(f"✓ Template {template_id} found in pipeline")
@@ -776,7 +782,8 @@ def main():
             print()
 
             # Parse pipeline YAML to find the template version
-            pipeline_yaml_str = pipeline.get('data', {}).get('yamlPipeline', '')
+            # Note: pipeline is already unwrapped by _get()
+            pipeline_yaml_str = pipeline.get('yamlPipeline', '')
             pipeline_yaml_dict = yaml.safe_load(pipeline_yaml_str)
 
             # Extract template refs from pipeline to find the version used
