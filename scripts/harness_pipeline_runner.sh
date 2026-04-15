@@ -261,6 +261,15 @@ main() {
   cd "$REPO_ROOT"
   log_info "Working directory: $REPO_ROOT"
 
+  # Verify Python script exists
+  if [ ! -f "$SCRIPT_DIR/validate_and_extract.py" ]; then
+    log_error "Python script not found at: $SCRIPT_DIR/validate_and_extract.py"
+    log_error "SCRIPT_DIR: $SCRIPT_DIR"
+    log_error "Files in scripts/:"
+    ls -la "$SCRIPT_DIR/" 2>&1 || log_error "Cannot list scripts directory"
+    exit 1
+  fi
+
   # Detect mode based on EXECUTION_URL presence
   local mode_type
   if [ -n "${EXECUTION_URL:-}" ]; then
@@ -294,15 +303,27 @@ main() {
   # Build command array
   log_info "Building Python command..."
   declare -a CMD_ARRAY=("$python_cmd" "$SCRIPT_DIR/validate_and_extract.py")
-  build_command_array "$mode_type"
+  build_command_array "$mode_type" || {
+    log_error "Failed to build command array"
+    exit 1
+  }
 
   # Format command for display
   local cmd_display
-  cmd_display=$(format_command_for_display "${CMD_ARRAY[@]}")
+  cmd_display=$(format_command_for_display "${CMD_ARRAY[@]}") || {
+    log_error "Failed to format command for display"
+    log_error "Python command: $python_cmd"
+    log_error "Script path: $SCRIPT_DIR/validate_and_extract.py"
+    log_error "Command array length: ${#CMD_ARRAY[@]}"
+    exit 1
+  }
 
   # Log command (with sensitive data masked)
   log_info "Command to execute:"
   log_info "  $(mask_sensitive_data "$cmd_display")"
+
+  # Debug: Show argument count
+  log_info "Total arguments: ${#CMD_ARRAY[@]}"
   echo ""
 
   # Log configuration summary
@@ -328,23 +349,26 @@ main() {
   log_separator
   echo ""
 
+  # Flush output before executing
+  sync
+
   # Execute the command using the array (properly handles spaces in arguments)
   local exit_code=0
-  "${CMD_ARRAY[@]}" || exit_code=$?
-
-  echo ""
-  log_separator
-
-  # Check exit code
-  if [ $exit_code -eq 0 ]; then
-    log_success "✓ Script completed successfully!"
+  if ! "${CMD_ARRAY[@]}" 2>&1; then
+    exit_code=$?
+    echo ""
     log_separator
-    exit 0
-  else
     log_error "✗ Script failed with exit code: $exit_code"
+    log_error "Command was: $(mask_sensitive_data "$cmd_display")"
     log_separator
     exit $exit_code
   fi
+
+  echo ""
+  log_separator
+  log_success "✓ Script completed successfully!"
+  log_separator
+  exit 0
 }
 
 # Run main function
