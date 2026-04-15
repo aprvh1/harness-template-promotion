@@ -255,8 +255,8 @@ class TemplatesApi:
         """
         resolved = self._client._resolve_scope(scope)
 
-        # This endpoint requires /gateway prefix
-        url = f"/gateway/pipeline/api/pipelines/execution/{execution_id}/metadata"
+        # Note: Don't add /gateway prefix - endpoint already includes it
+        url = f"/pipeline/api/pipelines/execution/{execution_id}/metadata"
         params = {
             "routingId": resolved.account_id,
             "accountIdentifier": resolved.account_id,

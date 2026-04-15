@@ -223,7 +223,8 @@ def validate_execution(
     logger.info("Fetching execution metadata with compiled YAML...")
     try:
         metadata = templates_api.get_execution_metadata(execution_id, scope)
-        execution_yaml = metadata.get('data', {}).get('executionYaml', '')
+        # _get() already unwraps 'data', so metadata IS the data
+        execution_yaml = metadata.get('executionYaml', '')
 
         if execution_yaml:
             logger.info(f"✓ Retrieved compiled execution YAML ({len(execution_yaml)} bytes)")
