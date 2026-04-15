@@ -275,9 +275,10 @@ def fetch_template(
 
     response = templates_api.get(identifier, version, scope)
 
-    # Extract YAML
-    yaml_str = response.get('data', {}).get('yaml')
+    # Extract YAML (_get already unwrapped 'data')
+    yaml_str = response.get('yaml')
     if not yaml_str:
+        logger.error(f"Response keys: {list(response.keys())}")
         raise ValueError(f"No YAML found for template {identifier} {version}")
 
     template_yaml = yaml.safe_load(yaml_str)
@@ -822,7 +823,7 @@ def main():
 
                 # VALIDATION 1: Check template is referenced in pipeline YAML
                 logger.info(f"Validating {args.template_id} reference in pipeline YAML...")
-                pipeline_yaml_str = pipeline.get('data', {}).get('yamlPipeline', '')
+                pipeline_yaml_str = pipeline.get('yamlPipeline', '')
                 pipeline_validation = validate_template_in_pipeline_yaml(args.template_id, pipeline_yaml_str)
 
                 if pipeline_validation.get('found'):
@@ -943,7 +944,7 @@ def main():
                 # Save all templates locally and validate against compiled YAML
                 print()
                 logger.info("Saving templates locally...")
-                pipeline_yaml_str = pipeline.get('data', {}).get('yamlPipeline', '')
+                pipeline_yaml_str = pipeline.get('yamlPipeline', '')
 
                 for tmpl in all_templates:
                     template_yaml, _ = fetch_template(
