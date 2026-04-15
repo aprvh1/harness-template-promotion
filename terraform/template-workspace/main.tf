@@ -69,13 +69,12 @@ resource "harness_platform_template" "versions" {
   # Template YAML content
   template_yaml = file(each.value.yaml_path)
 
-  # Tags for tracking
-  tags = {
-    # Get source version from tier_snapshots if this is a tier version
-    source_version = try(local.tier_snapshots[each.key], each.key)
-    managed_by     = "terraform"
-    template_type  = var.template_type
-  }
+  # Tags for tracking (set of strings in key:value format)
+  tags = [
+    "source_version:${try(local.tier_snapshots[each.key], each.key)}",
+    "managed_by:terraform",
+    "template_type:${var.template_type}"
+  ]
 
   # Scope handling for org/project-level templates
   org_id     = local.scope == "org" ? local.org : null
