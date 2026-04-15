@@ -116,3 +116,6 @@ node_modules/
 # Custom ignores for this project
 # Uncomment if needed
 # archived/
+
+templates/*
+terraform/control-workspace/terraform.tfvars
