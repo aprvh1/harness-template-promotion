@@ -1,0 +1,10 @@
+# Python dependencies for template promotion workflow
+
+# Harness Python SDK (installed from local directory)
+# Install with: pip install -e /Users/apoorvharsh/Downloads/harness-python-sdk
+
+# Core dependencies (should be satisfied by harness-python-sdk)
+pyyaml>=6.0
+httpx>=0.24.0
+pydantic>=2.0.0
+tenacity>=8.2.0

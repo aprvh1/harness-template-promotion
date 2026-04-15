@@ -1,0 +1,12 @@
+# Example Terraform variables for control workspace
+# Copy this file to terraform.tfvars and fill in your values
+
+harness_account_id       = "your-account-id"
+harness_platform_api_key = "your-platform-api-key"
+org_id                   = "default"
+project_id               = "your-project-id"
+git_connector_ref        = "org.your_git_connector"
+repository_name          = "template-promotion"
+repository_branch        = "main"
+terraform_version        = "1.5.7"
+harness_connector_ref    = "org.your_harness_connector"

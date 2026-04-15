@@ -1,64 +1,37 @@
-variable "harness_org_id" {
-  description = "Harness organization identifier"
-  type        = string
-}
+# Terraform variables for tier-based template management
 
-variable "harness_project_id" {
-  description = "Harness project identifier"
-  type        = string
-}
-
-variable "stage_template_version" {
-  description = "Version of stage template to deploy"
-  type        = string
-  default     = "v1.0.0"
-}
-
-variable "pipeline_template_version" {
-  description = "Version of pipeline template to deploy"
-  type        = string
-  default     = "v1.0.0"
-}
-
-variable "environment" {
-  description = "Environment name (dev, test, prod)"
-  type        = string
-  validation {
-    condition     = contains(["dev", "test", "prod"], var.environment)
-    error_message = "Environment must be one of: dev, test, prod"
+variable "tier_definitions" {
+  description = "Tier definitions for template promotion (informational)"
+  type = map(object({
+    name          = string
+    description   = string
+    project_count = number
+  }))
+  default = {
+    "1" = {
+      name          = "Tier 1 (Canary)"
+      description   = "Initial testing tier"
+      project_count = 5
+    }
+    "2" = {
+      name          = "Tier 2 (Early Adopters)"
+      description   = "Expanded testing"
+      project_count = 15
+    }
+    "3" = {
+      name          = "Tier 3 (Wave 1)"
+      description   = "First production wave"
+      project_count = 30
+    }
+    "4" = {
+      name          = "Tier 4 (Wave 2)"
+      description   = "Second production wave"
+      project_count = 30
+    }
+    "5" = {
+      name          = "Tier 5 (Stable)"
+      description   = "All projects - stable"
+      project_count = 20
+    }
   }
-}
-
-variable "promotion_tier" {
-  description = "Promotion tier for pipeline deployment (canary, early_adopters, stable, all)"
-  type        = string
-  default     = "all"
-  validation {
-    condition     = contains(["canary", "early_adopters", "stable", "all"], var.promotion_tier)
-    error_message = "Promotion tier must be one of: canary, early_adopters, stable, all"
-  }
-}
-
-variable "canary_pipelines" {
-  description = "List of pipeline identifiers in the canary tier"
-  type        = list(string)
-  default     = []
-}
-
-variable "early_adopter_pipelines" {
-  description = "List of pipeline identifiers in the early adopters tier"
-  type        = list(string)
-  default     = []
-}
-
-variable "stable_pipelines" {
-  description = "List of pipeline identifiers in the stable tier"
-  type        = list(string)
-  default     = []
-}
-
-variable "tags" {
-  description = "Common tags to apply to all resources"
-  type        = map(string)
-  default     = {}
 }

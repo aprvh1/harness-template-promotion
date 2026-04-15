@@ -1,0 +1,372 @@
+# Test scenarios for template extraction and promotion
+
+# Test configuration
+config:
+  harness_account_id: "Pt_YA3aYQT6g6ZW7MZOMJw"
+  harness_api_key: "pat.Pt_YA3aYQT6g6ZW7MZOMJw.69d7d2ccad02f422d7f1a281.cEpT0aKXkgx1lWya4M14"
+  project_id: "Twilio"
+  org_id: "default"
+  execution_url: "https://app.harness.io/ng/account/Pt_YA3aYQT6g6ZW7MZOMJw/all/orgs/default/projects/Twilio/pipelines/Template_Test/executions/jjKNCuZ1TNuRmXmDcp8KKg/pipeline?storeType=INLINE"
+
+# Test scenarios
+scenarios:
+  # ============================================================
+  # EXTRACTION MODE TESTS
+  # ============================================================
+
+  - id: "extract_single"
+    name: "Extract Single Template"
+    type: "extraction"
+    description: "Extract a single template without dependencies"
+    command:
+      template_id: "Stage_Template"
+      mode: "single"
+      changelog: "Test extraction of single template"
+    expected:
+      exit_code: 0
+      files_created:
+        - "templates/stage/Stage_Template-v1.yaml"
+      versions_yaml_updated: true
+      templates_count: 1
+    validation:
+      - check: "file_exists"
+        file: "templates/stage/Stage_Template-v1.yaml"
+      - check: "yaml_valid"
+        file: "templates/stage/Stage_Template-v1.yaml"
+      - check: "versions_entry_exists"
+        template_id: "Stage_Template"
+        template_type: "stage"
+        version: "v1"
+
+  - id: "extract_tree"
+    name: "Extract Template Tree (with Dependencies)"
+    type: "extraction"
+    description: "Extract template with all dependencies recursively"
+    command:
+      template_id: "Stage_Template"
+      mode: "tree"
+      changelog: "Test extraction with dependency tree"
+    expected:
+      exit_code: 0
+      files_created:
+        - "templates/stage/Stage_Template-v1.yaml"
+        - "templates/step-group/SG_Template-v1.yaml"
+        - "templates/step/Step-v1.yaml"
+      versions_yaml_updated: true
+      templates_count: 3
+    validation:
+      - check: "file_exists"
+        file: "templates/stage/Stage_Template-v1.yaml"
+      - check: "file_exists"
+        file: "templates/step-group/SG_Template-v1.yaml"
+      - check: "file_exists"
+        file: "templates/step/Step-v1.yaml"
+      - check: "dependency_tree_valid"
+        root: "Stage_Template"
+        children: ["SG_Template", "Step"]
+
+  - id: "extract_sanitize"
+    name: "Extract and Sanitize Template"
+    type: "extraction"
+    description: "Extract template and convert secrets/connectors to runtime inputs"
+    command:
+      template_id: "Stage_Template"
+      mode: "single"
+      changelog: "Test sanitization"
+      sanitize: true
+    expected:
+      exit_code: 0
+      sanitized: true
+    validation:
+      - check: "no_hardcoded_secrets"
+        file: "templates/stage/Stage_Template-v1.yaml"
+      - check: "no_hardcoded_connectors"
+        file: "templates/stage/Stage_Template-v1.yaml"
+      - check: "runtime_inputs_present"
+        file: "templates/stage/Stage_Template-v1.yaml"
+
+  # ============================================================
+  # PROMOTION MODE TESTS
+  # ============================================================
+
+  - id: "promote_sequential_tier1_to_tier2"
+    name: "Sequential Promotion (tier-1 → tier-2)"
+    type: "promotion"
+    description: "Promote template from tier-1 to tier-2 sequentially"
+    prerequisites:
+      - scenario: "extract_tree"
+      - deploy_tier: 1  # Simulate Terraform deploy
+    command:
+      template_id: "Stage_Template"
+      to_tier: 2
+      no_pr: true
+    expected:
+      exit_code: 0
+      files_created:
+        - "templates/stage/Stage_Template-tier-2.yaml"
+      versions_yaml_updated: true
+      tier_snapshot: "tier-2"
+    validation:
+      - check: "file_exists"
+        file: "templates/stage/Stage_Template-tier-2.yaml"
+      - check: "tier_snapshot_exists"
+        template_id: "Stage_Template"
+        tier: 2
+      - check: "content_matches"
+        file1: "templates/stage/Stage_Template-tier-1.yaml"
+        file2: "templates/stage/Stage_Template-tier-2.yaml"
+
+  - id: "promote_tier_skip"
+    name: "Tier Skip Promotion (tier-1 → tier-4)"
+    type: "promotion"
+    description: "Skip intermediate tiers and promote directly to tier-4"
+    prerequisites:
+      - scenario: "extract_tree"
+      - deploy_tier: 1
+    command:
+      template_id: "Stage_Template"
+      to_tier: 4
+      tier_skip: true
+      no_pr: true
+    expected:
+      exit_code: 0
+      files_created:
+        - "templates/stage/Stage_Template-tier-4.yaml"
+      skipped_tiers: [2, 3]
+    validation:
+      - check: "file_exists"
+        file: "templates/stage/Stage_Template-tier-4.yaml"
+      - check: "file_not_exists"
+        file: "templates/stage/Stage_Template-tier-2.yaml"
+      - check: "file_not_exists"
+        file: "templates/stage/Stage_Template-tier-3.yaml"
+      - check: "tier_snapshot_exists"
+        template_id: "Stage_Template"
+        tier: 4
+
+  - id: "promote_idempotent"
+    name: "Idempotent Promotion (re-run same promotion)"
+    type: "promotion"
+    description: "Run same promotion twice, second should skip"
+    prerequisites:
+      - scenario: "promote_sequential_tier1_to_tier2"
+    command:
+      template_id: "Stage_Template"
+      to_tier: 2
+      no_pr: true
+    expected:
+      exit_code: 0
+      skipped: true
+      message: "tier-2 already matches tier-1"
+    validation:
+      - check: "log_contains"
+        message: "skipping"
+
+  # ============================================================
+  # ERROR SCENARIO TESTS
+  # ============================================================
+
+  - id: "promote_missing_source_tier"
+    name: "Error: Missing Source Tier"
+    type: "promotion"
+    description: "Try to promote to tier-3 when tier-2 doesn't exist"
+    prerequisites:
+      - scenario: "extract_tree"
+      - deploy_tier: 1
+    command:
+      template_id: "Stage_Template"
+      to_tier: 3
+      no_pr: true
+    expected:
+      exit_code: 1
+      error_message: "Cannot promote to tier-3: tier-2 does not exist"
+    validation:
+      - check: "exit_code"
+        code: 1
+      - check: "error_message_contains"
+        text: "tier-2 does not exist"
+
+  - id: "promote_semantic_version_to_tier2"
+    name: "Error: Semantic Version to tier > 1"
+    type: "extraction"
+    description: "Try to deploy semantic version directly to tier-2 (should fail)"
+    command:
+      template_id: "Stage_Template"
+      mode: "single"
+      changelog: "Test invalid tier"
+      source_version: "v1.5"
+      to_tier: 2
+    expected:
+      exit_code: 1
+      error_message: "Semantic versions can ONLY be deployed to tier-1"
+    validation:
+      - check: "exit_code"
+        code: 1
+      - check: "error_message_contains"
+        text: "Semantic versions can ONLY be deployed to tier-1"
+
+  - id: "promote_template_not_found"
+    name: "Error: Template Not Found"
+    type: "promotion"
+    description: "Try to promote template that doesn't exist in versions.yaml"
+    command:
+      template_id: "NonExistent_Template"
+      to_tier: 2
+      no_pr: true
+    expected:
+      exit_code: 1
+      error_message: "Template 'NonExistent_Template' not found in versions.yaml"
+    validation:
+      - check: "exit_code"
+        code: 1
+      - check: "error_message_contains"
+        text: "not found in versions.yaml"
+
+  # ============================================================
+  # INTEGRATION TESTS
+  # ============================================================
+
+  - id: "full_workflow_extract_to_tier5"
+    name: "Full Workflow: Extract → Tier-1 → ... → Tier-5 (Stable)"
+    type: "integration"
+    description: "Complete workflow from extraction to stable release"
+    steps:
+      - step: "extract"
+        command:
+          template_id: "Stage_Template"
+          mode: "tree"
+          changelog: "Integration test"
+      - step: "deploy_tier_1"
+        simulate: true
+      - step: "promote_to_tier_2"
+        command:
+          template_id: "Stage_Template"
+          to_tier: 2
+          no_pr: true
+      - step: "deploy_tier_2"
+        simulate: true
+      - step: "promote_to_tier_3"
+        command:
+          template_id: "Stage_Template"
+          to_tier: 3
+          no_pr: true
+      - step: "deploy_tier_3"
+        simulate: true
+      - step: "promote_to_tier_4"
+        command:
+          template_id: "Stage_Template"
+          to_tier: 4
+          no_pr: true
+      - step: "deploy_tier_4"
+        simulate: true
+      - step: "promote_to_tier_5"
+        command:
+          template_id: "Stage_Template"
+          to_tier: 5
+          no_pr: true
+    expected:
+      all_tiers_deployed: [1, 2, 3, 4, 5]
+      tier_5_is_stable: true
+    validation:
+      - check: "all_tier_files_exist"
+        template_id: "Stage_Template"
+        tiers: [1, 2, 3, 4, 5]
+      - check: "tier_progression_valid"
+        template_id: "Stage_Template"
+
+  - id: "multi_template_promotion"
+    name: "Multi-Template Promotion"
+    type: "integration"
+    description: "Promote multiple templates together (maintaining dependencies)"
+    prerequisites:
+      - scenario: "extract_tree"  # Gets Stage_Template, SG_Template, Step
+      - deploy_tier: 1
+    steps:
+      - step: "promote_all_to_tier_2"
+        templates:
+          - "Stage_Template"
+          - "SG_Template"
+          - "Step"
+        to_tier: 2
+    expected:
+      all_templates_promoted: true
+    validation:
+      - check: "tier_files_exist"
+        templates: ["Stage_Template", "SG_Template", "Step"]
+        tier: 2
+      - check: "dependency_consistency"
+        tier: 2
+
+  # ============================================================
+  # SANITIZATION TESTS
+  # ============================================================
+
+  - id: "sanitize_secrets"
+    name: "Sanitize Hardcoded Secrets"
+    type: "sanitization"
+    description: "Convert hardcoded secrets to runtime inputs"
+    input_template: |
+      template:
+        name: Test
+        type: Step
+        spec:
+          type: ShellScript
+          spec:
+            connectorRef: "my_connector_123"
+            secretRef: "my_secret_456"
+            script: echo <+secrets.getValue("test_secret")>
+    expected_output: |
+      template:
+        name: Test
+        type: Step
+        spec:
+          type: ShellScript
+          spec:
+            connectorRef: "<+input>"
+            secretRef: "<+input>"
+            script: echo <+input>
+    validation:
+      - check: "no_hardcoded_values"
+      - check: "runtime_inputs_count"
+        count: 3
+
+  - id: "sanitize_project_variables"
+    name: "Sanitize Project Variables"
+    type: "sanitization"
+    description: "Convert project-specific variables to runtime inputs"
+    input_template: |
+      template:
+        name: Test
+        spec:
+          environmentVariables:
+            - name: REGION
+              value: <+project.region>
+            - name: ENV
+              value: <+env.variables.environment>
+    expected_output: |
+      template:
+        name: Test
+        spec:
+          environmentVariables:
+            - name: REGION
+              value: <+input>
+            - name: ENV
+              value: <+input>
+    validation:
+      - check: "no_environment_references"
+
+# Test execution order
+execution_order:
+  - "extract_single"
+  - "extract_tree"
+  - "extract_sanitize"
+  - "promote_sequential_tier1_to_tier2"
+  - "promote_tier_skip"
+  - "promote_idempotent"
+  - "promote_missing_source_tier"
+  - "promote_semantic_version_to_tier2"
+  - "promote_template_not_found"
+  - "sanitize_secrets"
+  - "sanitize_project_variables"
+  - "full_workflow_extract_to_tier5"
+  - "multi_template_promotion"
