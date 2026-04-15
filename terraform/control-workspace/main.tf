@@ -90,13 +90,13 @@ resource "harness_platform_workspace" "template_workspaces" {
 
   terraform_variable {
     key        = "harness_account_id"
-    value      = Pt_YA3aYQT6g6ZW7MZOMJw
+    value      = var.harness_account_id
     value_type = "string"
   }
 
   terraform_variable {
     key        = "harness_platform_api_key"
-    value      = harness_api_key
+    value      = var.harness_platform_api_key
     value_type = "secret"
   }
 
