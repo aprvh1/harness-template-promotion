@@ -13,11 +13,21 @@ from pathlib import Path
 from typing import Optional, List, Any, Dict, Set
 import yaml
 
-# Add Harness SDK to path
-sys.path.append("/Users/apoorvharsh/Downloads/harness-python-sdk/src")
+# Add src to path for local harness_api imports
+script_dir = Path(__file__).parent
+project_root = script_dir.parent
+sys.path.insert(0, str(project_root / "src"))
 
-from harness_python_sdk import HarnessClient, Scope
-from harness_python_sdk.exceptions import ApiError
+# Import Scope from SDK
+from harness_python_sdk import Scope
+
+# Use local HarnessAPIClient (more feature-complete than SDK)
+from harness_api.client import HarnessAPIClient as HarnessClient
+
+# Define ApiError
+class ApiError(Exception):
+    """Harness API error."""
+    pass
 
 # Setup logging
 logging.basicConfig(

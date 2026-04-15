@@ -1,0 +1,19 @@
+
+==========================================
+HARNESS PIPELINE RUNNER - FULL TEST SUITE
+==========================================
+
+Configuration:
+  API Key: ***MASKED***
+  Account: Pt_YA3aYQT6g6ZW7MZOMJw
+  Project: Twilio
+  NO_PR: true (all tests skip PR creation)
+
+Cleaning up test files...
+
+[0;34m================================[0m
+[0;34mTEST 1: Extract Single Template - Basic[0m
+[0;34m================================[0m
+[0;31m✗ FAILED: Script execution failed[0m
+[0;31m  Error: See test1.log for details[0m
+Restored versions.yaml backup

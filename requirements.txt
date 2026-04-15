@@ -8,7 +8,5 @@ tenacity>=8.2.0
 requests>=2.25.1
 python-dateutil>=2.8.2
 
-# Harness Python SDK
-# Note: If using custom/local SDK, install separately with:
-# pip install -e /path/to/harness-python-sdk
-# harness-python-sdk>=0.1.0
+# Harness Python SDK (available on PyPI)
+harness-python-sdk>=1.0.5
