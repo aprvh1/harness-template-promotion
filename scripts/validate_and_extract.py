@@ -642,6 +642,29 @@ def main():
                 source_yaml_dict['template']['versionLabel'] = target_tier_label
                 logger.info(f"  ✓ Updated template versionLabel to {target_tier_label}")
 
+            # Remove scope identifiers to make template reusable at account level
+            if 'template' in source_yaml_dict:
+                removed_fields = []
+                if 'projectIdentifier' in source_yaml_dict['template']:
+                    del source_yaml_dict['template']['projectIdentifier']
+                    removed_fields.append('projectIdentifier')
+                if 'orgIdentifier' in source_yaml_dict['template']:
+                    del source_yaml_dict['template']['orgIdentifier']
+                    removed_fields.append('orgIdentifier')
+                if removed_fields:
+                    logger.info(f"  ✓ Removed scope identifiers: {', '.join(removed_fields)}")
+
+                # Add tags for tracking
+                type_dir = template_type.replace('_', '-')
+                if 'tags' not in source_yaml_dict['template']:
+                    source_yaml_dict['template']['tags'] = {}
+                source_yaml_dict['template']['tags'].update({
+                    'source_version': source_semantic_version,
+                    'managed_by': 'terraform',
+                    'template_type': type_dir
+                })
+                logger.info(f"  ✓ Added tags: source_version={source_semantic_version}")
+
             # Write updated tier file
             with open(tier_file_path, 'w') as f:
                 yaml.dump(source_yaml_dict, f, default_flow_style=False, sort_keys=False)
@@ -1151,6 +1174,28 @@ def main():
                     if 'template' in template_content and 'versionLabel' in template_content['template']:
                         template_content['template']['versionLabel'] = tier_label
                         logger.info(f"    ✓ Updated template versionLabel to {tier_label}")
+
+                    # Remove scope identifiers to make template reusable at account level
+                    if 'template' in template_content:
+                        removed_fields = []
+                        if 'projectIdentifier' in template_content['template']:
+                            del template_content['template']['projectIdentifier']
+                            removed_fields.append('projectIdentifier')
+                        if 'orgIdentifier' in template_content['template']:
+                            del template_content['template']['orgIdentifier']
+                            removed_fields.append('orgIdentifier')
+                        if removed_fields:
+                            logger.info(f"    ✓ Removed scope identifiers: {', '.join(removed_fields)}")
+
+                        # Add tags for tracking
+                        if 'tags' not in template_content['template']:
+                            template_content['template']['tags'] = {}
+                        template_content['template']['tags'].update({
+                            'source_version': tmpl.version,
+                            'managed_by': 'terraform',
+                            'template_type': type_dir
+                        })
+                        logger.info(f"    ✓ Added tags: source_version={tmpl.version}")
 
                     # Save tier file
                     tier_file_path = os.path.join(

@@ -243,6 +243,22 @@ def save_template_yaml(
 
     file_path = template_dir / f"{version}.yaml"
 
+    # Remove scope identifiers to make template reusable at account level
+    if 'template' in template_yaml:
+        if 'projectIdentifier' in template_yaml['template']:
+            del template_yaml['template']['projectIdentifier']
+        if 'orgIdentifier' in template_yaml['template']:
+            del template_yaml['template']['orgIdentifier']
+
+        # Add tags for tracking
+        if 'tags' not in template_yaml['template']:
+            template_yaml['template']['tags'] = {}
+        template_yaml['template']['tags'].update({
+            'source_version': version,
+            'managed_by': 'terraform',
+            'template_type': dir_type
+        })
+
     with open(file_path, 'w') as f:
         yaml.dump(template_yaml, f, default_flow_style=False, sort_keys=False)
 
