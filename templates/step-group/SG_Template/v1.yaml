@@ -1,0 +1,18 @@
+template:
+  name: SG Template
+  type: StepGroup
+  spec:
+    steps:
+    - step:
+        name: Debug
+        identifier: Debug
+        template:
+          templateRef: account.Step
+          versionLabel: v1
+    stageType: Custom
+  identifier: SG_Template
+  versionLabel: v1
+  tags:
+    source_version: v1
+    managed_by: terraform
+    template_type: step-group
