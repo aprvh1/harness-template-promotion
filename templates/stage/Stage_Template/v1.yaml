@@ -40,7 +40,7 @@ template:
             name: Step Group
             identifier: Step_Group
             template:
-              templateRef: SG_Template
+              templateRef: <+input>
               versionLabel: v1
   identifier: Stage_Template
   versionLabel: v1

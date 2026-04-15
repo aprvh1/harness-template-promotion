@@ -28,6 +28,29 @@ Upload template to Harness with 5 versions:
 
 Projects tagged with `tier: "tier1"` can only use templates with `versionLabel: tier-1`.
 
+## Harness Pipeline Integration
+
+For CI/CD pipeline integration, use the wrapper script with environment variables:
+
+```yaml
+# In your Harness pipeline
+- step:
+    type: Run
+    spec:
+      envVariables:
+        HARNESS_API_KEY: <+secrets.getValue("harness_api_key")>
+        HARNESS_ACCOUNT_ID: <+account.identifier>
+        TEMPLATE_ID: "Stage_Template"
+        EXECUTION_URL: <+pipeline.variables.execution_url>
+        PROJECT_ID: "Twilio"
+        MODE: "tree"
+        TO_TIER: "1"
+      command: |
+        bash scripts/harness_pipeline_runner.sh
+```
+
+**📖 [docs/HARNESS_PIPELINE_USAGE.md](docs/HARNESS_PIPELINE_USAGE.md)** - Complete pipeline integration guide with examples
+
 ## Documentation
 
 **📖 [FINAL_MODEL.md](FINAL_MODEL.md)** - Complete guide for tier-based template promotion
@@ -44,6 +67,7 @@ Projects tagged with `tier: "tier1"` can only use templates with `versionLabel: 
 
 **Python Scripts:**
 - `scripts/validate_and_extract.py` - Extract templates from successful executions
+- `scripts/harness_pipeline_runner.sh` - Wrapper script for Harness pipelines (env vars interface)
 - `scripts/common.py` - Shared utilities
 
 
