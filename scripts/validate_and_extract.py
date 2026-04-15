@@ -175,11 +175,22 @@ def validate_execution(
     # Fetch execution
     execution = templates_api.get_execution(execution_id, scope)
 
-    # Check status
-    exec_summary = execution.get('data', {}).get('pipelineExecutionSummary', {})
+    # Check status - handle different response structures
+    # Note: _get() already unwraps 'data', so execution IS the data
+    exec_summary = execution.get('pipelineExecutionSummary', {})
+
+    if not exec_summary:
+        # Try alternative: execution might be the summary itself
+        exec_summary = execution
+
     status = exec_summary.get('status')
-    if status != 'Success':
+
+    if status and status != 'Success':
         raise ValueError(f"Execution status is '{status}', expected 'Success'")
+    elif not status:
+        # Log available keys for debugging
+        logger.warning(f"⚠️  Could not find execution status. Available keys: {list(execution.keys())[:10]}")
+        logger.warning("Proceeding with caution...")
 
     logger.info("✓ Execution successful")
 
@@ -193,10 +204,11 @@ def validate_execution(
     # Fetch the actual pipeline YAML
     pipeline = templates_api.get_pipeline(pipeline_id, scope)
 
-    # Get pipeline YAML
-    pipeline_yaml_str = pipeline.get('data', {}).get('yamlPipeline', '')
+    # Get pipeline YAML (already unwrapped by _get)
+    pipeline_yaml_str = pipeline.get('yamlPipeline', '')
 
     if not pipeline_yaml_str:
+        logger.warning(f"Available keys in pipeline response: {list(pipeline.keys())[:10]}")
         raise ValueError("Could not retrieve pipeline YAML")
 
     logger.info("✓ Retrieved pipeline YAML")

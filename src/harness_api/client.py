@@ -61,6 +61,34 @@ class HarnessAPIClient:
             self.templates_api = None
             self.pipeline_api = None
 
+        # Set default scope
+        self.default_scope = None
+
+    def _resolve_scope(self, scope):
+        """Resolve scope (use provided or default)."""
+        return scope if scope else self.default_scope
+
+    def _get(self, url: str, params: Optional[Dict] = None):
+        """Make HTTP GET request."""
+        import requests
+        full_url = f"{self.endpoint}{url}"
+        headers = {'x-api-key': self.api_key}
+        response = requests.get(full_url, params=params, headers=headers)
+        response.raise_for_status()
+        return response.json().get('data', {})
+
+    def _post(self, url: str, params: Optional[Dict] = None, body: Optional[Dict] = None):
+        """Make HTTP POST request."""
+        import requests
+        full_url = f"{self.endpoint}{url}"
+        headers = {
+            'x-api-key': self.api_key,
+            'Content-Type': 'application/json'
+        }
+        response = requests.post(full_url, params=params, json=body, headers=headers)
+        response.raise_for_status()
+        return response.json()
+
     def get_template_version(self, identifier: str, version_label: str,
                            org: Optional[str] = None, project: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
