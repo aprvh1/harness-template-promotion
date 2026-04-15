@@ -29,8 +29,18 @@ from datetime import date
 from typing import List, Set, Tuple
 import yaml
 
-# Import harness_python_sdk
-from harness_python_sdk import Scope
+# Import harness_python_sdk with compatibility wrapper
+from harness_python_sdk import Scope as _SDKScope
+
+# Compatibility wrapper for Scope (PyPI SDK uses 'account' not 'account_id')
+class Scope:
+    """Wrapper for Scope to handle different SDK versions."""
+    def __init__(self, account_id=None, org=None, project=None):
+        # PyPI SDK uses 'account' parameter, not 'account_id'
+        self._scope = _SDKScope(account=account_id, org=org, project=project)
+        self.account_id = account_id
+        self.org = org
+        self.project = project
 
 # Import extensions - support running from both root and scripts/ directory
 script_dir = os.path.dirname(os.path.abspath(__file__))

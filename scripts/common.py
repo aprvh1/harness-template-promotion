@@ -18,8 +18,18 @@ script_dir = Path(__file__).parent
 project_root = script_dir.parent
 sys.path.insert(0, str(project_root / "src"))
 
-# Import Scope from SDK
-from harness_python_sdk import Scope
+# Import Scope from SDK with compatibility wrapper
+from harness_python_sdk import Scope as _SDKScope
+
+# Compatibility wrapper for Scope (PyPI SDK uses 'account' not 'account_id')
+class Scope:
+    """Wrapper for Scope to handle different SDK versions."""
+    def __init__(self, account_id=None, org=None, project=None):
+        # PyPI SDK uses 'account' parameter, not 'account_id'
+        self._scope = _SDKScope(account=account_id, org=org, project=project)
+        self.account_id = account_id
+        self.org = org
+        self.project = project
 
 # Use local HarnessAPIClient (more feature-complete than SDK)
 from harness_api.client import HarnessAPIClient as HarnessClient
