@@ -1,0 +1,22 @@
+template:
+  name: Step
+  type: Step
+  spec:
+    type: ShellScript
+    spec:
+      shell: Bash
+      executionTarget: {}
+      source:
+        type: Inline
+        spec:
+          script: echo 1000
+      environmentVariables: []
+      outputVariables: []
+      delegateSelectors: []
+    timeout: 10m
+  identifier: Step
+  versionLabel: v1
+  tags:
+    source_version: v1
+    managed_by: terraform
+    template_type: step
