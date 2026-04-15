@@ -84,7 +84,8 @@ def parse_execution_url(url: str) -> dict:
     # - /account/{id}/orgs/{org}/projects/{project}/...
     # - /account/{id}/cd/orgs/{org}/projects/{project}/...
     # - /account/{id}/all/orgs/{org}/projects/{project}/...
-    pattern = r'/account/([^/]+)/(?:cd/|all/)?orgs/([^/]+)/projects/([^/]+)/pipelines/[^/]+/executions/([^/?]+)'
+    # Accepts both /executions/ and /deployments/ (Harness uses both)
+    pattern = r'/account/([^/]+)/(?:cd/|all/)?orgs/([^/]+)/projects/([^/]+)/pipelines/[^/]+/(?:executions|deployments)/([^/?]+)'
     match = re.search(pattern, url)
 
     if not match:
