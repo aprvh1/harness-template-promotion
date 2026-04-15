@@ -43,13 +43,19 @@ class HarnessAPIClient:
             raise ValueError("HARNESS_API_KEY must be provided or set as environment variable")
 
         if HAS_SDK:
-            self.config = Configuration(
-                host=self.endpoint,
-                api_key={'x-api-key': self.api_key}
-            )
-            self.api_client = ApiClient(self.config)
-            self.templates_api = TemplatesApi(self.api_client)
-            self.pipeline_api = PipelineApi(self.api_client)
+            try:
+                # Try PyPI SDK v1.0.5 API (different from custom SDK)
+                self.config = Configuration()
+                self.config.host = self.endpoint
+                self.config.api_key = {'x-api-key': self.api_key}
+                self.api_client = ApiClient(self.config)
+                self.templates_api = TemplatesApi(self.api_client)
+                self.pipeline_api = PipelineApi(self.api_client)
+            except (TypeError, AttributeError) as e:
+                # SDK API mismatch, fall back to direct HTTP
+                print(f"Warning: SDK API mismatch ({e}), using direct HTTP requests", file=sys.stderr)
+                self.templates_api = None
+                self.pipeline_api = None
         else:
             # Fallback to direct HTTP requests if SDK not available
             self.templates_api = None
