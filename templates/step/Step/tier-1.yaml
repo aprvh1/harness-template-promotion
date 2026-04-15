@@ -1,0 +1,20 @@
+template:
+  name: Step
+  type: Step
+  projectIdentifier: Twilio
+  orgIdentifier: default
+  spec:
+    type: ShellScript
+    spec:
+      shell: Bash
+      executionTarget: {}
+      source:
+        type: Inline
+        spec:
+          script: echo 1000
+      environmentVariables: []
+      outputVariables: []
+      delegateSelectors: []
+    timeout: 10m
+  identifier: Step
+  versionLabel: tier-1
