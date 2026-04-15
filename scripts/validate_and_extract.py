@@ -29,9 +29,24 @@ from datetime import date
 from typing import List, Set, Tuple
 import yaml
 
-# Add parent directory to path for imports
-sys.path.append("/Users/apoorvharsh/Downloads/harness-python-sdk/src")
-from harness_python_sdk import Scope
+# Try to import harness_python_sdk, fallback to local implementation
+try:
+    sys.path.append("/Users/apoorvharsh/Downloads/harness-python-sdk/src")
+    from harness_python_sdk import Scope
+    print("Warning: Using local harness_python_sdk from path")
+except (ImportError, ModuleNotFoundError):
+    # Local Scope implementation (fallback)
+    from dataclasses import dataclass
+    from typing import Optional
+
+    @dataclass
+    class Scope:
+        """Harness scope for API calls (account, org, project)."""
+        account_id: str
+        org: Optional[str] = None
+        project: Optional[str] = None
+
+    print("Warning: harness_python_sdk not installed. Using local Scope implementation.")
 
 # Import extensions - support running from both root and scripts/ directory
 script_dir = os.path.dirname(os.path.abspath(__file__))
