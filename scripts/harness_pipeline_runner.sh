@@ -166,7 +166,9 @@ validate_enums() {
 # Normalize boolean flag to true/false
 normalize_boolean() {
   local value="${1:-false}"
-  case "${value,,}" in  # Convert to lowercase
+  # Convert to lowercase (compatible with Bash 3.x+)
+  local lower_value=$(echo "$value" | tr '[:upper:]' '[:lower:]')
+  case "$lower_value" in
     true|1|yes) echo "true" ;;
     *) echo "false" ;;
   esac
@@ -182,30 +184,56 @@ build_command_array() {
   local mode_type="$1"
 
   # Always include template-id
-  CMD_ARRAY+=("--template-id" "$TEMPLATE_ID")
+  CMD_ARRAY+=("--template-id" "$TEMPLATE_ID") || return 1
 
   if [ "$mode_type" = "extraction" ]; then
     # Extraction mode arguments
-    CMD_ARRAY+=("--execution-url" "$EXECUTION_URL")
-    CMD_ARRAY+=("--project-id" "$PROJECT_ID")
+    CMD_ARRAY+=("--execution-url" "$EXECUTION_URL") || return 1
+    CMD_ARRAY+=("--project-id" "$PROJECT_ID") || return 1
 
     # Optional extraction arguments
-    [ -n "${CHANGELOG:-}" ] && CMD_ARRAY+=("--changelog" "$CHANGELOG")
-    [ -n "${MODE:-}" ] && CMD_ARRAY+=("--mode" "$MODE")
-    [ -n "${SOURCE_VERSION:-}" ] && CMD_ARRAY+=("--source-version" "$SOURCE_VERSION")
-    [ -n "${TO_TIER:-}" ] && CMD_ARRAY+=("--to-tier" "$TO_TIER")
+    if [ -n "${CHANGELOG:-}" ]; then
+      CMD_ARRAY+=("--changelog" "$CHANGELOG") || return 1
+    fi
+
+    if [ -n "${MODE:-}" ]; then
+      CMD_ARRAY+=("--mode" "$MODE") || return 1
+    fi
+
+    if [ -n "${SOURCE_VERSION:-}" ]; then
+      CMD_ARRAY+=("--source-version" "$SOURCE_VERSION") || return 1
+    fi
+
+    if [ -n "${TO_TIER:-}" ]; then
+      CMD_ARRAY+=("--to-tier" "$TO_TIER") || return 1
+    fi
 
     # Boolean flags
-    [ "$(normalize_boolean "${SANITIZE:-false}")" = "true" ] && CMD_ARRAY+=("--sanitize")
+    local sanitize_normalized
+    sanitize_normalized=$(normalize_boolean "${SANITIZE:-false}") || return 1
+    if [ "$sanitize_normalized" = "true" ]; then
+      CMD_ARRAY+=("--sanitize") || return 1
+    fi
 
   else
     # Promotion mode arguments
-    CMD_ARRAY+=("--to-tier" "$TO_TIER")
+    CMD_ARRAY+=("--to-tier" "$TO_TIER") || return 1
 
     # Boolean flags
-    [ "$(normalize_boolean "${TIER_SKIP:-false}")" = "true" ] && CMD_ARRAY+=("--tier-skip")
-    [ "$(normalize_boolean "${NO_PR:-false}")" = "true" ] && CMD_ARRAY+=("--no-pr")
+    local tier_skip_normalized
+    tier_skip_normalized=$(normalize_boolean "${TIER_SKIP:-false}") || return 1
+    if [ "$tier_skip_normalized" = "true" ]; then
+      CMD_ARRAY+=("--tier-skip") || return 1
+    fi
+
+    local no_pr_normalized
+    no_pr_normalized=$(normalize_boolean "${NO_PR:-false}") || return 1
+    if [ "$no_pr_normalized" = "true" ]; then
+      CMD_ARRAY+=("--no-pr") || return 1
+    fi
   fi
+
+  return 0
 }
 
 # Format command array as string for display (with proper quoting)
