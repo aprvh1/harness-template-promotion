@@ -665,6 +665,23 @@ def main():
                 })
                 logger.info(f"  ✓ Added tags: source_version={source_semantic_version}")
 
+            # Qualify templateRef with account. prefix
+            def add_account_prefix(obj):
+                if isinstance(obj, dict):
+                    if 'templateRef' in obj and isinstance(obj['templateRef'], str):
+                        ref = obj['templateRef']
+                        if not ref.startswith(('account.', 'org.')):
+                            obj['templateRef'] = f"account.{ref}"
+                            logger.info(f"  ✓ Qualified: {ref} → account.{ref}")
+                    for v in obj.values():
+                        if isinstance(v, (dict, list)):
+                            add_account_prefix(v)
+                elif isinstance(obj, list):
+                    for item in obj:
+                        add_account_prefix(item)
+
+            add_account_prefix(source_yaml_dict)
+
             # Write updated tier file
             with open(tier_file_path, 'w') as f:
                 yaml.dump(source_yaml_dict, f, default_flow_style=False, sort_keys=False)
@@ -1196,6 +1213,23 @@ def main():
                             'template_type': type_dir
                         })
                         logger.info(f"    ✓ Added tags: source_version={tmpl.version}")
+
+                    # Qualify templateRef with account. prefix
+                    def add_account_prefix_tier(obj):
+                        if isinstance(obj, dict):
+                            if 'templateRef' in obj and isinstance(obj['templateRef'], str):
+                                ref = obj['templateRef']
+                                if not ref.startswith(('account.', 'org.')):
+                                    obj['templateRef'] = f"account.{ref}"
+                                    logger.info(f"    ✓ Qualified: {ref} → account.{ref}")
+                            for v in obj.values():
+                                if isinstance(v, (dict, list)):
+                                    add_account_prefix_tier(v)
+                        elif isinstance(obj, list):
+                            for item in obj:
+                                add_account_prefix_tier(item)
+
+                    add_account_prefix_tier(template_content)
 
                     # Save tier file
                     tier_file_path = os.path.join(

@@ -259,6 +259,22 @@ def save_template_yaml(
             'template_type': dir_type
         })
 
+    # Qualify templateRef with account. prefix
+    def add_account_prefix(obj):
+        if isinstance(obj, dict):
+            if 'templateRef' in obj and isinstance(obj['templateRef'], str):
+                ref = obj['templateRef']
+                if not ref.startswith(('account.', 'org.')):
+                    obj['templateRef'] = f"account.{ref}"
+            for v in obj.values():
+                if isinstance(v, (dict, list)):
+                    add_account_prefix(v)
+        elif isinstance(obj, list):
+            for item in obj:
+                add_account_prefix(item)
+
+    add_account_prefix(template_yaml)
+
     with open(file_path, 'w') as f:
         yaml.dump(template_yaml, f, default_flow_style=False, sort_keys=False)
 
