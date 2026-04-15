@@ -96,8 +96,8 @@ resource "harness_platform_workspace" "template_workspaces" {
 
   terraform_variable {
     key        = "harness_platform_api_key"
-    value      = "<+secrets.getValue(harness_api_key)>"
-    value_type = "string"
+    value      = "harness_api_key"
+    value_type = "secret"
   }
 
   terraform_variable {
