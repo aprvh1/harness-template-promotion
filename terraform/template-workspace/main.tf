@@ -16,6 +16,8 @@ provider "harness" {
   # Authentication via environment variables:
   # HARNESS_ACCOUNT_ID
   # HARNESS_API_KEY
+  account_id      = var.harness_account_id
+  platform_api_key = var.harness_platform_api_key
 }
 
 locals {
@@ -57,6 +59,7 @@ resource "harness_platform_template" "versions" {
   for_each = local.template_versions
 
   # Template identification
+  name = var.template_identifier
   identifier = var.template_identifier
   version    = each.value.version  # v1, tier-1, tier-2, etc.
 
