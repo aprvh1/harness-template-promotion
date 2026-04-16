@@ -649,6 +649,15 @@ class TemplateExtractor:
                 "dependency_depth": max(t.depth for t in all_templates) if all_templates else 0,
                 "saved_files": saved_files,
                 "files_saved": len(saved_files),
+                "tree": [
+                    {
+                        "identifier": tmpl.identifier,
+                        "version": tmpl.version,
+                        "template_type": tmpl.type,
+                        "depth": tmpl.depth
+                    }
+                    for tmpl in all_templates
+                ],
             }
 
             logger.info("=" * 60)
