@@ -57,7 +57,7 @@ resource "harness_platform_workspace" "template_workspaces" {
   for_each = local.templates_map
 
   identifier  = "${replace(each.value.type, "-", "_")}_${each.value.identifier}"
-  name        = "${each.value.type}/${each.value.identifier}"
+  name        = "${each.value.identifier}"
   description = "Manages all versions of ${each.value.identifier} template"
 
   # Required attributes
