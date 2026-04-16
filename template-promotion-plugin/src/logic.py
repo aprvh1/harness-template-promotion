@@ -957,6 +957,125 @@ class TemplatePromoter:
             )
 
 
+def _execute_combined_mode(client, config) -> PluginResult:
+    """Execute combined mode: extract then promote.
+
+    Args:
+        client: HarnessAPIClient instance
+        config: PluginConfig instance
+
+    Returns:
+        PluginResult with combined outputs
+    """
+    logger.info("")
+    logger.info("=" * 60)
+    logger.info("COMBINED MODE: EXTRACT + PROMOTE")
+    logger.info("=" * 60)
+
+    # Step 1: Extract templates
+    logger.info("")
+    logger.info("Phase 1: EXTRACTION")
+    logger.info("-" * 60)
+    extractor = TemplateExtractor(client, config)
+
+    if config.mode == "single":
+        extract_result = extractor.extract_single()
+    else:
+        extract_result = extractor.extract_tree()
+
+    if not extract_result.success:
+        return extract_result
+
+    # Step 2: Promote all extracted templates
+    logger.info("")
+    logger.info("Phase 2: PROMOTION")
+    logger.info("-" * 60)
+
+    # Get list of templates to promote
+    templates_to_promote = []
+    if config.mode == "tree":
+        # In tree mode, we need to promote all extracted templates
+        # Parse from extraction outputs
+        tree_data = extract_result.outputs.get("tree", [])
+        for tmpl in tree_data:
+            templates_to_promote.append({
+                "template_id": tmpl["identifier"],
+                "template_type": tmpl["template_type"]
+            })
+    else:
+        # Single mode - just one template
+        templates_to_promote.append({
+            "template_id": config.template_id,
+            "template_type": extract_result.outputs.get("template_type", "stage")
+        })
+
+    logger.info(f"Promoting {len(templates_to_promote)} template(s) to tier-{config.to_tier}...")
+
+    # Promote each template
+    promoter = TemplatePromoter(client, config)
+    promoted_templates = []
+    failed_promotions = []
+
+    for tmpl in templates_to_promote:
+        template_id = tmpl["template_id"]
+        logger.info("")
+        logger.info(f"Promoting {template_id}...")
+
+        # Create temp config for this template
+        temp_config = config.model_copy()
+        temp_config.template_id = template_id
+
+        # Run promotion
+        temp_promoter = TemplatePromoter(client, temp_config)
+        promo_result = temp_promoter.promote()
+
+        if promo_result.success:
+            promoted_templates.append(template_id)
+            logger.info(f"  ✓ {template_id} promoted successfully")
+        else:
+            failed_promotions.append({
+                "template_id": template_id,
+                "error": promo_result.message
+            })
+            logger.warning(f"  ✗ {template_id} promotion failed: {promo_result.message}")
+
+    # Compile results
+    logger.info("")
+    logger.info("=" * 60)
+    logger.info(f"✅ COMBINED MODE COMPLETED")
+    logger.info(f"   Extracted: {len(templates_to_promote)} template(s)")
+    logger.info(f"   Promoted: {len(promoted_templates)} template(s)")
+    if failed_promotions:
+        logger.info(f"   Failed: {len(failed_promotions)} promotion(s)")
+    logger.info("=" * 60)
+
+    # Build combined outputs
+    combined_outputs = {
+        "mode": "combined",
+        "extraction": extract_result.outputs,
+        "promotion": {
+            "target_tier": f"tier-{config.to_tier}",
+            "promoted_templates": promoted_templates,
+            "failed_promotions": failed_promotions,
+            "success_count": len(promoted_templates),
+            "failure_count": len(failed_promotions)
+        }
+    }
+
+    success = len(failed_promotions) == 0
+    if success:
+        message = f"Successfully extracted and promoted {len(promoted_templates)} template(s) to tier-{config.to_tier}"
+    else:
+        message = f"Extracted {len(templates_to_promote)} template(s), promoted {len(promoted_templates)}, failed {len(failed_promotions)}"
+
+    return PluginResult(
+        success=success,
+        message=message,
+        outputs=combined_outputs,
+        error=None if success else f"{len(failed_promotions)} promotion(s) failed"
+    )
+
+
 def execute_plugin(config) -> PluginResult:
     """Main plugin execution logic.
 
@@ -977,18 +1096,21 @@ def execute_plugin(config) -> PluginResult:
         )
 
         logger.info(f"Client initialized for account: {config.account_id}")
-        logger.info(f"Operating in {config.get_mode()} mode")
+        mode = config.get_mode()
+        logger.info(f"Operating in {mode} mode")
 
         # Route to appropriate handler
-        if config.get_mode() == "extraction":
+        if mode == "extraction":
             extractor = TemplateExtractor(client, config)
             if config.mode == "single":
                 return extractor.extract_single()
             else:
                 return extractor.extract_tree()
-        else:
+        elif mode == "promotion":
             promoter = TemplatePromoter(client, config)
             return promoter.promote()
+        else:  # combined mode
+            return _execute_combined_mode(client, config)
 
     except Exception as e:
         logger.error(f"Plugin execution failed: {e}", exc_info=True)

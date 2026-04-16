@@ -82,11 +82,28 @@ class PluginConfig(BaseSettings):
     @field_validator("to_tier")
     @classmethod
     def validate_promotion_params(cls, v, info):
-        """Validate promotion-specific parameters."""
+        """Validate that at least one operation mode is specified.
+
+        Valid combinations:
+        - execution_url only: extraction mode
+        - to_tier only: promotion mode
+        - both: combined mode (extract + promote)
+        """
         if not v and not info.data.get("execution_url"):
-            raise ValueError("Either execution_url or to_tier must be provided")
+            raise ValueError("Either execution_url, to_tier, or both must be provided")
         return v
 
-    def get_mode(self) -> Literal["extraction", "promotion"]:
-        """Determine operation mode."""
-        return "extraction" if self.execution_url else "promotion"
+    def get_mode(self) -> Literal["extraction", "promotion", "combined"]:
+        """Determine operation mode.
+
+        Returns:
+            - "combined": Both execution_url and to_tier provided (extract then promote)
+            - "extraction": Only execution_url provided
+            - "promotion": Only to_tier provided
+        """
+        if self.execution_url and self.to_tier:
+            return "combined"
+        elif self.execution_url:
+            return "extraction"
+        else:
+            return "promotion"
