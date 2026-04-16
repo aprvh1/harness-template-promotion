@@ -88,6 +88,10 @@ class VersionsManager:
                 'tiers': {}
             }
 
+        # Ensure 'tiers' key exists (for backwards compatibility)
+        if 'tiers' not in data['templates'][template_type][identifier]:
+            data['templates'][template_type][identifier]['tiers'] = {}
+
         # Update tier mapping
         data['templates'][template_type][identifier]['tiers'][tier_label] = semantic_version
 
