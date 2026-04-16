@@ -25,6 +25,8 @@ from utils import (
     remove_scope_identifiers,
     add_template_tags,
     extract_template_refs,
+    update_template_version_label,
+    update_child_template_versions,
 )
 from versions_manager import VersionsManager
 
@@ -774,7 +776,7 @@ class TemplatePromoter:
 
         return True, ""
 
-    def promote(self) -> PluginResult:
+    def promote(self, version_mapping: Optional[Dict[str, str]] = None) -> PluginResult:
         """Promote template from source version to target tier.
 
         Promotion Rules:
@@ -857,7 +859,7 @@ class TemplatePromoter:
             template_type = template_data.get('templateEntityType', 'Stage').lower()
             logger.info(f"  ✓ Fetched template (type: {template_type})")
 
-            # Step 4: Process template (remove scopes, qualify refs, add tags)
+            # Step 4: Process template (remove scopes, qualify refs, add tags, update versions)
             logger.info("")
             logger.info(f"Step 4: Processing template...")
             processed_yaml = remove_scope_identifiers(template_yaml)
@@ -871,6 +873,16 @@ class TemplatePromoter:
                 {"promoted_from": source_version, "tier": f"tier-{target_tier}"}
             )
             logger.info(f"  ✓ Added tracking tags")
+
+            # Update template's own versionLabel to tier version
+            tier_version = f"tier-{target_tier}"
+            processed_yaml = update_template_version_label(processed_yaml, tier_version)
+            logger.info(f"  ✓ Updated versionLabel to {tier_version}")
+
+            # Update child template versions if version_mapping provided (combined mode)
+            if version_mapping:
+                processed_yaml = update_child_template_versions(processed_yaml, version_mapping)
+                logger.info(f"  ✓ Updated child template versions")
 
             # Step 5: Write tier file
             logger.info("")
@@ -1020,6 +1032,15 @@ def _execute_combined_mode(client, config) -> PluginResult:
 
     logger.info(f"Promoting {len(templates_to_promote)} template(s) to tier-{config.to_tier}...")
 
+    # Build version mapping for all templates being promoted
+    # This allows child templates to reference the correct tier versions
+    tier_version = f"tier-{config.to_tier}"
+    version_mapping = {
+        tmpl["template_id"]: tier_version
+        for tmpl in templates_to_promote
+    }
+    logger.info(f"Version mapping: {version_mapping}")
+
     # Promote each template
     promoter = TemplatePromoter(client, config)
     promoted_templates = []
@@ -1034,9 +1055,9 @@ def _execute_combined_mode(client, config) -> PluginResult:
         temp_config = config.model_copy()
         temp_config.template_id = template_id
 
-        # Run promotion
+        # Run promotion with version_mapping
         temp_promoter = TemplatePromoter(client, temp_config)
-        promo_result = temp_promoter.promote()
+        promo_result = temp_promoter.promote(version_mapping=version_mapping)
 
         if promo_result.success:
             promoted_templates.append(template_id)

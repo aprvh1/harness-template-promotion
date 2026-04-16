@@ -762,3 +762,65 @@ def add_template_tags(yaml_dict: Dict, tags: Dict[str, str]) -> Dict:
         yaml_dict['template']['tags'].update(tags)
 
     return yaml_dict
+
+
+def update_template_version_label(yaml_dict: Dict, new_version: str) -> Dict:
+    """Update the template's own versionLabel.
+
+    Args:
+        yaml_dict: Template YAML dictionary
+        new_version: New version label (e.g., "tier-1", "tier-2")
+
+    Returns:
+        Modified YAML dictionary with updated versionLabel
+    """
+    if isinstance(yaml_dict, dict) and 'template' in yaml_dict:
+        yaml_dict['template']['versionLabel'] = new_version
+
+    return yaml_dict
+
+
+def update_child_template_versions(yaml_dict: Dict, version_mapping: Dict[str, str]) -> Dict:
+    """Update versionLabel in child template references.
+
+    Recursively walks the YAML and updates versionLabel for templates
+    that are being promoted together.
+
+    Args:
+        yaml_dict: Template YAML dictionary
+        version_mapping: Dict mapping template identifier to new version
+                        e.g., {"Stage_Template": "tier-1", "SG_Template": "tier-1"}
+
+    Returns:
+        Modified YAML dictionary with updated child template versions
+    """
+    def _update_refs(obj: Any) -> Any:
+        """Recursively update template references."""
+        if isinstance(obj, dict):
+            # Check if this is a template reference
+            if 'template' in obj and isinstance(obj['template'], dict):
+                template_block = obj['template']
+
+                # Extract templateRef (could be just identifier or account.identifier)
+                if 'templateRef' in template_block:
+                    ref = template_block['templateRef']
+
+                    # Remove scope prefix to get identifier
+                    identifier = ref.split('.')[-1]  # account.Step -> Step
+
+                    # If this template is in our mapping, update its version
+                    if identifier in version_mapping:
+                        template_block['versionLabel'] = version_mapping[identifier]
+
+            # Recurse into all dict values
+            return {k: _update_refs(v) for k, v in obj.items()}
+
+        elif isinstance(obj, list):
+            # Recurse into all list items
+            return [_update_refs(item) for item in obj]
+
+        else:
+            # Leave primitives unchanged
+            return obj
+
+    return _update_refs(yaml_dict)
