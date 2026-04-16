@@ -22,6 +22,7 @@ terraform.rc
 secrets.tfvars
 *.secret
 *.secrets
+test.conf
 
 # Environment-specific overrides
 *.local.tfvars
@@ -97,6 +98,16 @@ test-results/
 .pytest_cache/
 __pycache__/
 *.pyc
+
+# Python virtual environments
+venv/
+.venv/
+env/
+.env/
+ENV/
+*.egg-info/
+dist/
+build/
 
 # Package managers
 node_modules/

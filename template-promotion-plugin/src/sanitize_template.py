@@ -7,8 +7,10 @@ and are portable across environments.
 
 import yaml
 import re
+import logging
 from typing import Any, Dict, List
-from common import logger
+
+logger = logging.getLogger(__name__)
 
 
 # Patterns to detect fields that should be runtime inputs
