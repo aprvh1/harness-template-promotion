@@ -12,8 +12,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir --user -r requirements.txt
 
-# Stage 2: Runtime
-FROM python:3.11-slim
+# Stage 2: Runtime - Based on image with harness-python-api-sdk pre-installed
+FROM harnesssolutionfactory/harness-python-api-sdk:latest
 
 WORKDIR /plugin
 

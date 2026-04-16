@@ -5,7 +5,7 @@ All configuration loaded from PLUGIN_* environment variables.
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
-from typing import Optional, Literal
+from typing import Optional, Literal, Union
 
 
 class PluginConfig(BaseSettings):
@@ -19,8 +19,8 @@ class PluginConfig(BaseSettings):
         description="Harness API endpoint"
     )
 
-    # Template identification (required)
-    template_id: str = Field(..., description="Template identifier")
+    # Template identification (optional for bulk promotion)
+    template_id: Optional[str] = Field(None, description="Template identifier (optional for bulk promotion)")
 
     # Extraction-specific (optional)
     execution_url: Optional[str] = Field(None, description="Harness execution URL")
@@ -33,11 +33,9 @@ class PluginConfig(BaseSettings):
     source_version: Optional[str] = Field(None, description="Semantic version (v1.0)")
 
     # Promotion-specific (optional)
-    to_tier: Optional[int] = Field(
+    to_tier: Union[int, Literal["stable"], None] = Field(
         None,
-        ge=1,
-        le=5,
-        description="Target tier (1-5)"
+        description="Target tier (1-5) or 'stable'"
     )
     tier_skip: bool = Field(
         default=False,
@@ -78,6 +76,27 @@ class PluginConfig(BaseSettings):
         "case_sensitive": False,
     }
 
+    @field_validator("execution_url", "source_version", "changelog", "template_id", mode="before")
+    @classmethod
+    def convert_null_strings(cls, v):
+        """Convert string 'null' to None (common when passing through pipelines)."""
+        if isinstance(v, str) and v.lower() in ('null', 'none', ''):
+            return None
+        return v
+
+    @field_validator("to_tier", mode="before")
+    @classmethod
+    def convert_to_tier_value(cls, v):
+        """Convert to_tier value - handle string 'stable' and numeric values."""
+        if isinstance(v, str):
+            if v.lower() == 'stable':
+                return 'stable'
+            # Try to convert numeric string to int
+            try:
+                return int(v)
+            except ValueError:
+                raise ValueError(f"Invalid to_tier value: {v}. Must be 1-5 or 'stable'")
+        return v
 
     @field_validator("to_tier")
     @classmethod
@@ -85,12 +104,21 @@ class PluginConfig(BaseSettings):
         """Validate that at least one operation mode is specified.
 
         Valid combinations:
-        - execution_url only: extraction mode
-        - to_tier only: promotion mode
+        - execution_url only: extraction mode (requires template_id)
+        - to_tier only: promotion mode (template_id optional for bulk)
         - both: combined mode (extract + promote)
         """
         if not v and not info.data.get("execution_url"):
             raise ValueError("Either execution_url, to_tier, or both must be provided")
+
+        # Validate tier number range (if not stable)
+        if isinstance(v, int) and (v < 1 or v > 5):
+            raise ValueError("to_tier must be between 1 and 5, or 'stable'")
+
+        # For extraction or combined mode, template_id is required
+        if info.data.get("execution_url") and not info.data.get("template_id"):
+            raise ValueError("template_id is required when extraction_url is provided")
+
         return v
 
     def get_mode(self) -> Literal["extraction", "promotion", "combined"]:

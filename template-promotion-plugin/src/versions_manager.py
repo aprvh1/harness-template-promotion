@@ -171,3 +171,63 @@ class VersionsManager:
                     })
 
         return result
+
+    def update_stable_label(
+        self,
+        template_type: str,
+        identifier: str,
+        source_version: str
+    ) -> None:
+        """Update stable label to track which version is marked as stable.
+
+        Args:
+            template_type: Template type (stage, step_group, etc.)
+            identifier: Template identifier
+            source_version: Source version that was promoted to stable (e.g., tier-2, v1)
+        """
+        data = self.load()
+
+        # Ensure labels.stable exists
+        if 'labels' not in data:
+            data['labels'] = {'canary': {}, 'stable': {}}
+        if 'stable' not in data['labels']:
+            data['labels']['stable'] = {}
+
+        # Track which version was promoted to stable
+        # Format: {identifier: source_version}
+        data['labels']['stable'][identifier] = source_version
+
+        # Also update current_version in templates section
+        if template_type in data['templates'] and identifier in data['templates'][template_type]:
+            data['templates'][template_type][identifier]['current_version'] = 'stable'
+
+        self.save(data)
+        logger.info(f"  ✓ Updated stable label: {identifier} promoted from {source_version}")
+
+    def get_highest_tier(
+        self,
+        template_type: str,
+        identifier: str
+    ) -> Optional[int]:
+        """Get highest tier number for a template (for stable promotion).
+
+        Args:
+            template_type: Template type
+            identifier: Template identifier
+
+        Returns:
+            Highest tier number (e.g., 5 for tier-5) or None if no tiers
+        """
+        data = self.load()
+
+        try:
+            tiers = data['templates'][template_type][identifier]['tiers']
+            # Extract tier numbers from tier labels (tier-1 → 1)
+            tier_numbers = [
+                int(label.replace('tier-', ''))
+                for label in tiers.keys()
+                if label.startswith('tier-')
+            ]
+            return max(tier_numbers) if tier_numbers else None
+        except (KeyError, ValueError):
+            return None

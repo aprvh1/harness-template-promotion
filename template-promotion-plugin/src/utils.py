@@ -110,7 +110,8 @@ def extract_template_refs(yaml_dict: Dict, path: str = "root") -> List[TemplateR
 def validate_template_in_pipeline_yaml(
     template_id: str,
     pipeline_yaml: str,
-    expected_version: Optional[str] = None
+    expected_version: Optional[str] = None,
+    verbose: bool = False
 ) -> Dict[str, Any]:
     """Validate template is referenced in pipeline YAML with correct version.
 
@@ -118,6 +119,7 @@ def validate_template_in_pipeline_yaml(
         template_id: Template identifier to check
         pipeline_yaml: Pipeline YAML string
         expected_version: Expected version label (optional)
+        verbose: Enable detailed logging (default: False)
 
     Returns:
         Dict with validation results:
@@ -144,6 +146,22 @@ def validate_template_in_pipeline_yaml(
         version_match = True
         if expected_version:
             version_match = all(v == expected_version for v in versions if v is not None)
+
+        # Verbose logging
+        if verbose:
+            logger.info(f"Level 1: Template Reference Validation")
+            if matching_refs:
+                logger.info(f"  ✓ Found {len(matching_refs)} reference(s) to {template_id} in pipeline YAML")
+                for i, ref in enumerate(matching_refs, 1):
+                    version_str = ref.version_label if ref.version_label else "no version"
+                    logger.info(f"  → Location {i}: {ref.path} (version: {version_str})")
+                if expected_version:
+                    if version_match:
+                        logger.info(f"  ✓ All references use expected version: {expected_version}")
+                    else:
+                        logger.warning(f"  ✗ Version mismatch! Expected: {expected_version}, Found: {versions}")
+            else:
+                logger.warning(f"  ✗ Template {template_id} not found in pipeline YAML")
 
         return {
             "found": len(matching_refs) > 0,
@@ -327,7 +345,8 @@ def search_and_compare_blocks(template_content: Dict, execution_dict: Dict, path
 def validate_template_structure_in_execution_yaml(
     template_yaml: Dict,
     execution_yaml: str,
-    template_id: str
+    template_id: str,
+    verbose: bool = False
 ) -> Dict[str, Any]:
     """Validate template structure appears in execution YAML.
 
@@ -337,6 +356,7 @@ def validate_template_structure_in_execution_yaml(
         template_yaml: Template YAML dictionary
         execution_yaml: Execution YAML string
         template_id: Template identifier
+        verbose: Enable detailed logging (default: False)
 
     Returns:
         Dict with validation results:
@@ -357,6 +377,18 @@ def validate_template_structure_in_execution_yaml(
         matching, total, locations = search_and_compare_blocks(template_content, execution_dict)
 
         match_percentage = (matching / total * 100) if total > 0 else 0
+
+        # Verbose logging
+        if verbose:
+            logger.info(f"Level 2: Structure Validation")
+            if match_percentage > 30:
+                logger.info(f"  ✓ Found matching template structure in execution YAML")
+                logger.info(f"  → Match percentage: {match_percentage:.1f}% ({matching}/{total} keys matched)")
+                if locations:
+                    logger.info(f"  → Locations: {', '.join(locations[:3])}")  # Show first 3 locations
+                logger.info(f"  ✓ Structure validation passed (threshold: 30%)")
+            else:
+                logger.warning(f"  ✗ Structure match too low: {match_percentage:.1f}% < 30%")
 
         return {
             "found": match_percentage > 30,  # At least 30% match
@@ -461,7 +493,8 @@ def extract_comparable_items(yaml_dict: Dict, path: str = "root") -> List[tuple]
 def validate_content_hash(
     template_yaml: Dict,
     execution_yaml: str,
-    template_id: str
+    template_id: str,
+    verbose: bool = False
 ) -> Dict[str, Any]:
     """Validate template content hash by comparing individual comparable items.
 
@@ -472,6 +505,7 @@ def validate_content_hash(
         template_yaml: Template YAML dictionary
         execution_yaml: Execution YAML string
         template_id: Template identifier
+        verbose: Enable detailed logging (default: False)
 
     Returns:
         Dict with validation results:
@@ -541,6 +575,22 @@ def validate_content_hash(
         # Create summary hash from all template items
         all_template_str = yaml.dump([item for _, item in template_items], sort_keys=True)
         template_hash = hashlib.sha256(all_template_str.encode()).hexdigest()[:12]
+
+        # Verbose logging
+        if verbose:
+            logger.info(f"Level 3: Content Hash Validation")
+            logger.info(f"  ✓ Comparing {items_compared} items without template references")
+            if items_matched == items_compared:
+                logger.info(f"  → All {items_compared} items matched!")
+                logger.info(f"  ✓ Content hash validation: 100% ({items_matched}/{items_compared} items matched)")
+            else:
+                for i in range(min(3, items_matched)):  # Show first 3 matches
+                    logger.info(f"  → Item {i+1}: hash matched")
+                if items_matched > 3:
+                    logger.info(f"  → ... ({items_matched - 3} more items matched)")
+                if items_compared > items_matched:
+                    logger.warning(f"  ✗ {items_compared - items_matched} item(s) did not match")
+                logger.info(f"  → Content hash validation: {match_percentage:.1f}% ({items_matched}/{items_compared} items matched)")
 
         return {
             "found": True,
@@ -623,7 +673,8 @@ def validate_scripts(
     template_yaml: Dict,
     execution_yaml: str,
     template_id: str,
-    threshold: float = 80.0
+    threshold: float = 80.0,
+    verbose: bool = False
 ) -> Dict[str, Any]:
     """Validate scripts in template match execution.
 
@@ -632,6 +683,7 @@ def validate_scripts(
         execution_yaml: Execution YAML string
         template_id: Template identifier
         threshold: Minimum match percentage (default 80%)
+        verbose: Enable detailed logging (default: False)
 
     Returns:
         Dict with validation results:
@@ -669,6 +721,22 @@ def validate_scripts(
 
         avg_match = sum(match_percentages) / len(match_percentages) if match_percentages else 0.0
         all_above = all(m >= threshold for m in match_percentages)
+
+        # Verbose logging
+        if verbose:
+            logger.info(f"Level 4: Script Validation")
+            logger.info(f"  ✓ Found {len(template_scripts)} script(s) in template")
+            for i, (script, match_pct) in enumerate(zip(template_scripts, match_percentages), 1):
+                # Truncate script content for display
+                script_preview = script["content"][:50].replace('\n', ' ')
+                if len(script["content"]) > 50:
+                    script_preview += "..."
+                logger.info(f"  → Script {i}: {match_pct:.1f}% match ({script_preview})")
+            if all_above:
+                logger.info(f"  ✓ All scripts above threshold ({threshold}%)")
+            else:
+                below_count = sum(1 for m in match_percentages if m < threshold)
+                logger.warning(f"  ✗ {below_count} script(s) below threshold")
 
         return {
             "found": True,
@@ -824,3 +892,46 @@ def update_child_template_versions(yaml_dict: Dict, version_mapping: Dict[str, s
             return obj
 
     return _update_refs(yaml_dict)
+
+
+def remove_child_template_version_labels(yaml_dict: Dict) -> Dict:
+    """Remove versionLabel from all child template references.
+
+    Used when promoting to stable - child templates should have no versionLabel
+    so they default to stable versions.
+
+    Args:
+        yaml_dict: Template YAML dictionary
+
+    Returns:
+        Updated YAML dictionary with versionLabel removed from all template refs
+    """
+    def _remove_version_labels(obj, is_root=False):
+        """Recursively walk YAML and remove versionLabel from template blocks."""
+        if isinstance(obj, dict):
+            # Check if this is a CHILD template reference (not the root template definition)
+            # Child refs have both 'template' key AND 'templateRef' inside
+            if 'template' in obj and isinstance(obj['template'], dict) and not is_root:
+                template_block = obj['template']
+
+                # Only remove versionLabel if this is a reference (has templateRef)
+                if 'templateRef' in template_block and 'versionLabel' in template_block:
+                    del template_block['versionLabel']
+
+            # Recurse into all dict values (skip root on first level)
+            if is_root:
+                # For root, recurse but mark children as non-root
+                return {k: _remove_version_labels(v, is_root=False) if k != 'template' else v
+                        for k, v in obj.items()}
+            else:
+                return {k: _remove_version_labels(v, is_root=False) for k, v in obj.items()}
+
+        elif isinstance(obj, list):
+            # Recurse into all list items
+            return [_remove_version_labels(item, is_root=False) for item in obj]
+
+        else:
+            # Leave primitives unchanged
+            return obj
+
+    return _remove_version_labels(yaml_dict, is_root=True)

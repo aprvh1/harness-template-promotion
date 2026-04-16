@@ -12,9 +12,7 @@ from typing import Dict, Any, Optional, List, Set, Tuple
 from dataclasses import dataclass
 from pathlib import Path
 
-from harness_api import HarnessAPIClient
-from harness_api.templates import TemplatesApi
-from harness_api.client import Scope
+from harness_api import HarnessClient, Scope, TemplatesApi
 from utils import (
     TemplateMetadata,
     validate_template_in_pipeline_yaml,
@@ -27,12 +25,59 @@ from utils import (
     extract_template_refs,
     update_template_version_label,
     update_child_template_versions,
+    remove_child_template_version_labels,
 )
 from sanitize_template import sanitize_template
 from versions_manager import VersionsManager
 
 
 logger = logging.getLogger(__name__)
+
+# Constants
+TEMPLATE_TYPES = ["stage", "stepgroup", "step", "pipeline"]
+
+
+# ============================================================
+# Helper Functions
+# ============================================================
+
+def _create_scope(account_id: str, org: str = None, project: str = None) -> Scope:
+    """Create Scope object from parameters."""
+    return Scope(account_id=account_id, org=org, project=project)
+
+
+def _parse_scope_from_url(execution_url: str) -> Scope:
+    """Parse scope from execution URL."""
+    url_parts = parse_execution_url(execution_url)
+    return _create_scope(
+        account_id=url_parts['account_id'],
+        org=url_parts['org'],
+        project=url_parts['project']
+    )
+
+
+def _parse_scope_from_config(config) -> Scope:
+    """Parse scope from plugin configuration."""
+    if config.execution_url:
+        return _parse_scope_from_url(config.execution_url)
+    elif config.project_id:
+        return _create_scope(
+            account_id=config.account_id,
+            org=config.org_id or 'default',
+            project=config.project_id
+        )
+    else:
+        return _create_scope(account_id=config.account_id)
+
+
+def _get_template_file_path(
+    output_dir: str,
+    template_type: str,
+    identifier: str,
+    version: str
+) -> Path:
+    """Build template file path."""
+    return Path(output_dir) / template_type / identifier / f"{version}.yaml"
 
 
 def _save_template_file(
@@ -199,10 +244,10 @@ def discover_dependencies_recursive(
 class TemplateExtractor:
     """Handles template extraction logic with full validation."""
 
-    def __init__(self, client: HarnessAPIClient, config):
+    def __init__(self, client: HarnessClient, config):
         self.client = client
         self.config = config
-        self.client.templates = TemplatesApi(self.client)
+        self.templates = TemplatesApi(self.client)
 
     def _validate_execution(self, execution_id: str, scope: Scope) -> Dict[str, Any]:
         """Validate execution and fetch YAML.
@@ -218,31 +263,33 @@ class TemplateExtractor:
             ValueError: If execution failed or validation failed
         """
         logger.info("Fetching execution metadata...")
-        execution = self.client.templates.get_execution(execution_id, scope)
+        execution = self.templates.get_execution(execution_id, scope)
 
-        # Get execution status
-        exec_summary = execution.get('pipelineExecutionSummary', {})
+        # Get execution status - SDK uses snake_case
+        exec_summary = execution.get('pipeline_execution_summary', {}) if isinstance(execution, dict) else {}
         if not exec_summary:
-            exec_summary = execution
+            exec_summary = execution if isinstance(execution, dict) else {}
 
-        status = exec_summary.get('status')
+        status = exec_summary.get('status') if isinstance(exec_summary, dict) else None
         logger.info(f"Execution status: {status}")
 
         if status not in ['Success', 'succeeded']:
             raise ValueError(f"Execution failed or not completed: {status}")
 
-        # Get pipeline YAML
-        pipeline_id = exec_summary.get('pipelineIdentifier')
+        # Get pipeline YAML - try both snake_case and camelCase
+        pipeline_id = exec_summary.get('pipeline_identifier') or exec_summary.get('pipelineIdentifier')
         if not pipeline_id:
+            if self.config.verbose:
+                logger.info(f"exec_summary keys: {list(exec_summary.keys()) if isinstance(exec_summary, dict) else 'NOT A DICT'}")
             raise ValueError("No pipeline identifier in execution")
 
         logger.info(f"Fetching pipeline: {pipeline_id}")
-        pipeline = self.client.templates.get_pipeline(pipeline_id, scope)
+        pipeline = self.templates.get_pipeline(pipeline_id, scope)
         pipeline_yaml = pipeline.get('yamlPipeline', '')
 
         # Get execution YAML
         logger.info("Fetching execution YAML...")
-        exec_metadata = self.client.templates.get_execution_metadata(execution_id, scope)
+        exec_metadata = self.templates.get_execution_metadata(execution_id, scope)
         execution_yaml = exec_metadata.get('executionYaml', '')
 
         return {
@@ -278,11 +325,13 @@ class TemplateExtractor:
         template_version = template_yaml.get('template', {}).get('versionLabel')
 
         # Validation 1: Pipeline reference and version
-        logger.info("VALIDATION 1: Checking pipeline reference...")
+        if not self.config.verbose:
+            logger.info("VALIDATION 1: Checking pipeline reference...")
         results['pipeline_ref'] = validate_template_in_pipeline_yaml(
             template_id,
             pipeline_yaml,
-            template_version
+            template_version,
+            verbose=self.config.verbose
         )
         if results['pipeline_ref']['found']:
             count = results['pipeline_ref']['reference_count']
@@ -301,11 +350,13 @@ class TemplateExtractor:
 
         # Validation 2: Structure match
         if execution_yaml:
-            logger.info("VALIDATION 2: Checking structure match...")
+            if not self.config.verbose:
+                logger.info("VALIDATION 2: Checking structure match...")
             results['structure'] = validate_template_structure_in_execution_yaml(
                 template_yaml,
                 execution_yaml,
-                template_id
+                template_id,
+                verbose=self.config.verbose
             )
             match_pct = results['structure'].get('match_percentage', 0)
             matching = results['structure'].get('matching_keys', 0)
@@ -322,11 +373,13 @@ class TemplateExtractor:
 
         # Validation 3: Content hash
         if execution_yaml:
-            logger.info("VALIDATION 3: Checking content hash...")
+            if not self.config.verbose:
+                logger.info("VALIDATION 3: Checking content hash...")
             results['hash'] = validate_content_hash(
                 template_yaml,
                 execution_yaml,
-                template_id
+                template_id,
+                verbose=self.config.verbose
             )
 
             items_compared = results['hash'].get('items_compared', 0)
@@ -357,11 +410,13 @@ class TemplateExtractor:
 
         # Validation 4: Scripts
         if execution_yaml:
-            logger.info("VALIDATION 4: Checking script content...")
+            if not self.config.verbose:
+                logger.info("VALIDATION 4: Checking script content...")
             results['scripts'] = validate_scripts(
                 template_yaml,
                 execution_yaml,
-                template_id
+                template_id,
+                verbose=self.config.verbose
             )
             count = results['scripts'].get('scripts_validated', 0)
             avg = results['scripts'].get('avg_match_percentage', 0)
@@ -371,24 +426,6 @@ class TemplateExtractor:
 
         return results
 
-    def _save_template(
-        self,
-        template_yaml: Dict,
-        template_type: str,
-        identifier: str,
-        version: str
-    ) -> Path:
-        """Save template YAML to local file.
-
-        Delegates to module-level _save_template_file() function.
-        """
-        return _save_template_file(
-            template_yaml,
-            template_type,
-            identifier,
-            version,
-            self.config.output_dir
-        )
 
     def extract_single(self) -> PluginResult:
         """Extract single template with full validation.
@@ -413,7 +450,7 @@ class TemplateExtractor:
                 logger.info(f"{yaml.dump(url_parts, default_flow_style=False)}")
 
             # Create scope
-            scope = Scope(
+            scope = _create_scope(
                 account_id=url_parts['account_id'],
                 org=url_parts['org'],
                 project=url_parts['project']
@@ -441,18 +478,9 @@ class TemplateExtractor:
 
             # Determine template type
             logger.info(f"Fetching template: {self.config.template_id}")
-            try:
-                template_type = self.client.templates.determine_template_type(
-                    self.config.template_id,
-                    scope
-                )
-                logger.info(f"  Detected type: {template_type}")
-            except Exception as e:
-                logger.warning(f"  Could not auto-detect type: {e}")
-                template_type = "unknown"
 
             # Fetch template
-            template_data = self.client.templates.get(
+            template_data = self.templates.get(
                 self.config.template_id,
                 self.config.source_version or "v1",
                 scope
@@ -468,6 +496,12 @@ class TemplateExtractor:
 
             template_yaml_str = template_data.get('yaml')
             template_yaml = yaml.safe_load(template_yaml_str)
+
+            # Determine template type from YAML
+            template_type = template_yaml.get('template', {}).get('type', '').lower()
+            if not template_type or template_type == '':
+                template_type = "unknown"
+            logger.info(f"  Template type: {template_type}")
 
             if self.config.verbose:
                 logger.info(f"\n📋 ORIGINAL TEMPLATE YAML:")
@@ -522,11 +556,12 @@ class TemplateExtractor:
             # Save template to file
             logger.info("")
             logger.info("Saving template to file...")
-            file_path = self._save_template(
+            file_path = _save_template_file(
                 template_yaml,
                 template_type,
                 self.config.template_id,
-                self.config.source_version or "v1"
+                self.config.source_version or "v1",
+                self.config.output_dir
             )
 
             # Output results
@@ -578,7 +613,7 @@ class TemplateExtractor:
             url_parts = parse_execution_url(self.config.execution_url)
 
             # Create scope
-            scope = Scope(
+            scope = _create_scope(
                 account_id=url_parts['account_id'],
                 org=url_parts['org'],
                 project=url_parts['project']
@@ -592,7 +627,7 @@ class TemplateExtractor:
             logger.info("Discovering dependency tree...")
             visited = set()
             all_templates = discover_dependencies_recursive(
-                self.client.templates,
+                self.templates,
                 self.config.template_id,
                 self.config.source_version or "v1",
                 scope,
@@ -610,7 +645,7 @@ class TemplateExtractor:
                 logger.info(f"Processing {tmpl.identifier} (depth {tmpl.depth})...")
 
                 # Fetch template YAML
-                template_data = self.client.templates.get(tmpl.identifier, tmpl.version, scope)
+                template_data = self.templates.get(tmpl.identifier, tmpl.version, scope)
                 if not template_data:
                     logger.warning(f"  ⚠ Could not fetch {tmpl.identifier}")
                     continue
@@ -644,11 +679,12 @@ class TemplateExtractor:
                     logger.info(f"  {processed_yaml_str}")
 
                 # Save template to file
-                file_path = self._save_template(
+                file_path = _save_template_file(
                     template_yaml,
                     tmpl.type,
                     tmpl.identifier,
-                    tmpl.version
+                    tmpl.version,
+                    self.config.output_dir
                 )
                 saved_files.append(str(file_path))
 
@@ -699,30 +735,15 @@ class TemplateExtractor:
 class TemplatePromoter:
     """Handles template promotion logic."""
 
-    def __init__(self, client: HarnessAPIClient, config):
+    def __init__(self, client: HarnessClient, config):
         self.client = client
         self.config = config
-        self.client.templates = TemplatesApi(self.client)
-        self.versions_manager = VersionsManager()
+        self.templates = TemplatesApi(self.client)
+        # Initialize versions manager with path in parent of output directory
+        # versions.yaml should be alongside templates/ directory, not inside it
+        versions_file = Path(self.config.output_dir).parent / "versions.yaml"
+        self.versions_manager = VersionsManager(str(versions_file))
 
-    def _save_template(
-        self,
-        template_yaml: Dict,
-        template_type: str,
-        identifier: str,
-        version: str
-    ) -> Path:
-        """Save template YAML to file.
-
-        Delegates to module-level _save_template_file() function.
-        """
-        return _save_template_file(
-            template_yaml,
-            template_type,
-            identifier,
-            version,
-            self.config.output_dir
-        )
 
     def _determine_source_version(self, target_tier: int, tier_skip: bool) -> Optional[str]:
         """Determine source version for promotion.
@@ -765,38 +786,60 @@ class TemplatePromoter:
         self,
         source_version: str,
         target_tier: int,
-        tier_skip: bool
+        tier_skip: bool,
+        template_id: str = None,
+        template_type: str = "stage"
     ) -> Tuple[bool, str]:
         """Validate promotion follows tier rules.
 
         Returns:
             (is_valid, error_message)
         """
+        # Check if this is a rollback (re-promotion to existing tier)
+        if template_id:
+            # Try to find the target file (check all template types)
+            for tmpl_type in TEMPLATE_TYPES:
+                target_file = _get_template_file_path(
+                    self.config.output_dir,
+                    tmpl_type,
+                    template_id,
+                    f"tier-{target_tier}"
+                )
+                if target_file.exists():
+                    logger.info(f"  ℹ️  Rollback detected: tier-{target_tier} already exists, re-promoting with {source_version}")
+                    return True, ""
+
         # Rule 1: Semantic versions (v1, v2) can only go to tier-1
         if source_version.startswith('v') and target_tier != 1:
             return False, f"Semantic version {source_version} can only promote to tier-1, not tier-{target_tier}"
 
-        # Rule 2: tier-N can only go to tier-N+1 (unless tier_skip enabled)
+        # Rule 2: tier-N can only go to tier-N+1 (unless tier_skip enabled or rollback)
         if source_version.startswith('tier-'):
             source_tier = int(source_version.replace('tier-', ''))
 
-            # Check backwards first (this is always invalid)
-            if target_tier <= source_tier:
-                return False, f"Cannot promote backwards from {source_version} to tier-{target_tier}"
+            # Allow same-tier (rollback scenario)
+            if target_tier == source_tier:
+                logger.info(f"  ℹ️  Same-tier promotion detected (rollback/re-promotion)")
+                return True, ""
 
-            # Check skip (only if not backwards)
+            # Check backwards (tier-3 → tier-2 without explicit source_version)
+            if target_tier < source_tier:
+                return False, f"Cannot promote backwards from {source_version} to tier-{target_tier}. For rollback, specify PLUGIN_SOURCE_VERSION explicitly."
+
+            # Check skip (only if not backwards or same)
             if not tier_skip and target_tier != source_tier + 1:
                 return False, f"{source_version} can only promote to tier-{source_tier + 1} (enable tier_skip to skip)"
 
         return True, ""
 
     def promote(self, version_mapping: Optional[Dict[str, str]] = None) -> PluginResult:
-        """Promote template from source version to target tier.
+        """Promote template from source version to target tier or stable.
 
         Promotion Rules:
         - v1/v2/v3 (semantic) can only promote to tier-1
         - tier-N can only promote to tier-N+1
         - With tier_skip=true: can skip to highest available tier below target
+        - Any tier can promote to stable
 
         Returns:
             PluginResult with promotion summary
@@ -805,6 +848,10 @@ class TemplatePromoter:
             template_id = self.config.template_id
             target_tier = self.config.to_tier
             tier_skip = self.config.tier_skip
+
+            # Check if promoting to stable
+            if target_tier == "stable":
+                return self._promote_to_stable(template_id, version_mapping)
 
             logger.info("=" * 60)
             logger.info(f"STARTING TEMPLATE PROMOTION TO TIER-{target_tier}")
@@ -833,7 +880,12 @@ class TemplatePromoter:
             # Step 2: Validate promotion rules
             logger.info("")
             logger.info("Step 2: Validating promotion rules...")
-            valid, error_msg = self._validate_promotion_rules(source_version, target_tier, tier_skip)
+            valid, error_msg = self._validate_promotion_rules(
+                source_version,
+                target_tier,
+                tier_skip,
+                template_id=template_id
+            )
             if not valid:
                 return PluginResult(
                     success=False,
@@ -848,46 +900,53 @@ class TemplatePromoter:
             logger.info(f"Step 3: Fetching template from Harness...")
             logger.info(f"  Fetching {template_id} @ {source_version}")
 
-            # Determine scope based on whether we have execution_url with org/project
-            if self.config.execution_url:
-                # Parse scope from execution URL
-                url_parts = parse_execution_url(self.config.execution_url)
-                scope = Scope(
-                    account_id=url_parts['account_id'],
-                    org=url_parts['org'],
-                    project=url_parts['project']
-                )
-            elif self.config.project_id:
-                # Use config project_id (assume org is 'default' if not specified)
-                scope = Scope(
-                    account_id=self.config.account_id,
-                    org=self.config.org_id or 'default',
-                    project=self.config.project_id
-                )
-            else:
-                # Fall back to account-level scope
-                scope = Scope(account_id=self.config.account_id)
+            # Step 3: Fetch template - try local file first, then Harness
+            logger.info("")
+            logger.info(f"Step 3: Fetching template from local or Harness...")
 
-            template_data = self.client.templates.get(
+            # Try to read from local file first (for locally promoted templates)
+            template_type = "stage"  # Will be updated from YAML
+            source_file = _get_template_file_path(
+                self.config.output_dir,
+                template_type,
                 template_id,
-                version=source_version,
-                scope=scope
+                source_version
             )
 
-            if not template_data or 'yaml' not in template_data:
-                return PluginResult(
-                    success=False,
-                    message=f"Failed to fetch template {template_id} @ {source_version}",
-                    outputs={},
-                    error="Template fetch failed"
+            if source_file.exists():
+                logger.info(f"  ✓ Found local file: {source_file}")
+                with open(source_file, 'r') as f:
+                    template_yaml_str = f.read()
+                template_yaml = yaml.safe_load(template_yaml_str)
+                # Get type from YAML
+                template_type = template_yaml.get('template', {}).get('type', 'Stage').lower()
+                logger.info(f"  ✓ Loaded from local file (type: {template_type})")
+            else:
+                # Determine scope from config
+                scope = _parse_scope_from_config(self.config)
+
+                logger.info(f"  → Fetching from Harness ({template_id} @ {source_version})...")
+                template_data = self.templates.get(
+                    template_id,
+                    version=source_version,
+                    scope=scope
                 )
 
-            # Parse YAML from response
-            template_yaml_str = template_data.get('yaml')
-            template_yaml = yaml.safe_load(template_yaml_str)
+                if not template_data or 'yaml' not in template_data:
+                    return PluginResult(
+                        success=False,
+                        message=f"Failed to fetch template {template_id} @ {source_version}",
+                        outputs={},
+                        error="Template fetch failed"
+                    )
 
-            # Get template type from metadata or parsed YAML
-            template_type = template_data.get('templateEntityType', 'Stage').lower()
+                # Parse YAML from response
+                template_yaml_str = template_data.get('yaml')
+                template_yaml = yaml.safe_load(template_yaml_str)
+
+                # Get template type from metadata or parsed YAML
+                template_type = template_data.get('templateEntityType', 'Stage').lower()
+                logger.info(f"  ✓ Fetched from Harness (type: {template_type})")
             logger.info(f"  ✓ Fetched template (type: {template_type})")
 
             # Step 4: Process template (remove scopes, qualify refs, add tags, update versions)
@@ -924,11 +983,12 @@ class TemplatePromoter:
             # Step 5: Write tier file
             logger.info("")
             logger.info(f"Step 5: Writing tier file...")
-            file_path = self._save_template(
+            file_path = _save_template_file(
                 processed_yaml,
                 template_type,
                 template_id,
-                f"tier-{target_tier}"
+                f"tier-{target_tier}",
+                self.config.output_dir
             )
 
             # Step 6: Update versions.yaml
@@ -1014,12 +1074,220 @@ class TemplatePromoter:
                 error=str(e)
             )
 
+    def _promote_to_stable(self, template_id: str, version_mapping: Optional[Dict[str, str]] = None) -> PluginResult:
+        """Promote template to stable version.
+
+        Args:
+            template_id: Template identifier
+            version_mapping: Optional version mapping for bulk stable promotion
+
+        Returns:
+            PluginResult with stable promotion summary
+        """
+        try:
+            logger.info("=" * 60)
+            logger.info("STARTING TEMPLATE PROMOTION TO STABLE")
+            logger.info("=" * 60)
+            logger.info(f"Template: {template_id}")
+
+            # Step 1: Determine source version
+            logger.info("")
+            logger.info("Step 1: Determining source version...")
+
+            # If explicitly provided, use it
+            if self.config.source_version:
+                source_version = self.config.source_version
+                logger.info(f"  ✓ Using explicitly provided version: {source_version}")
+            else:
+                # Auto-detect: use highest tier
+                template_type = "stage"  # TODO: Get actual type
+                highest_tier = self.versions_manager.get_highest_tier(template_type, template_id)
+                if highest_tier:
+                    source_version = f"tier-{highest_tier}"
+                    logger.info(f"  ✓ Auto-detected highest tier: {source_version}")
+                else:
+                    # Fall back to looking for semantic versions
+                    error_msg = "No tiers found. Provide PLUGIN_SOURCE_VERSION explicitly (e.g., v1, tier-2)"
+                    return PluginResult(
+                        success=False,
+                        message=error_msg,
+                        outputs={},
+                        error="Source version determination failed"
+                    )
+
+            # Step 2: Determine scope
+            logger.info("")
+            logger.info("Step 2: Determining scope...")
+            if self.config.execution_url:
+                url_parts = parse_execution_url(self.config.execution_url)
+                scope = Scope(
+                    account_id=url_parts['account_id'],
+                    org=url_parts['org'],
+                    project=url_parts['project']
+                )
+            elif self.config.project_id:
+                scope = Scope(
+                    account_id=self.config.account_id,
+                    org=self.config.org_id or 'default',
+                    project=self.config.project_id
+                )
+            else:
+                scope = Scope(account_id=self.config.account_id)
+            logger.info(f"  ✓ Scope: account={scope.account}, org={scope.org}, project={scope.project}")
+
+            # Step 3: Mark version as stable in Harness using SDK
+            logger.info("")
+            logger.info(f"Step 3: Marking {source_version} as stable in Harness...")
+            try:
+                self.templates.mark_stable(template_id, source_version, scope)
+                logger.info(f"  ✓ Successfully marked {template_id}@{source_version} as stable")
+            except Exception as e:
+                logger.warning(f"  ⚠️  Failed to mark as stable in Harness: {e}")
+                logger.warning(f"  ⚠️  Continuing with local stable.yaml creation...")
+
+            # Step 4: Fetch the template - try local file first, then Harness
+            logger.info("")
+            logger.info(f"Step 4: Fetching template from local or Harness...")
+
+            # Try to read from local file first (for locally promoted templates)
+            template_type = "stage"  # Will be updated from YAML
+            source_file = _get_template_file_path(
+                self.config.output_dir,
+                template_type,
+                template_id,
+                source_version
+            )
+
+            if source_file.exists():
+                logger.info(f"  ✓ Found local file: {source_file}")
+                with open(source_file, 'r') as f:
+                    template_yaml_str = f.read()
+                template_yaml = yaml.safe_load(template_yaml_str)
+                # Get type from YAML
+                template_type = template_yaml.get('template', {}).get('type', 'Stage').lower()
+                logger.info(f"  ✓ Loaded from local file (type: {template_type})")
+            else:
+                # Fetch from Harness
+                try:
+                    # Try to fetch stable version first
+                    template_data = self.templates.get_stable(template_id, scope)
+                    logger.info(f"  ✓ Fetched stable template from Harness")
+
+                    # Parse YAML
+                    template_yaml_str = template_data.get('yaml')
+                    template_yaml = yaml.safe_load(template_yaml_str)
+                    template_type = template_data.get('templateEntityType', 'Stage').lower()
+                except Exception as e:
+                    # Fall back to source version
+                    logger.warning(f"  ⚠️  Failed to fetch stable version: {e}")
+                    logger.info(f"  → Fetching source version {source_version} instead...")
+                    template_data = self.templates.get(template_id, version=source_version, scope=scope)
+                    logger.info(f"  ✓ Fetched template @ {source_version} from Harness")
+
+                    if not template_data or 'yaml' not in template_data:
+                        return PluginResult(
+                            success=False,
+                            message=f"Failed to fetch template {template_id}",
+                            outputs={},
+                            error="Template fetch failed"
+                        )
+
+                    # Parse YAML
+                    template_yaml_str = template_data.get('yaml')
+                    template_yaml = yaml.safe_load(template_yaml_str)
+                    template_type = template_data.get('templateEntityType', 'Stage').lower()
+
+            # Step 5: Process template
+            logger.info("")
+            logger.info(f"Step 5: Processing template...")
+            processed_yaml = remove_scope_identifiers(template_yaml)
+            logger.info(f"  ✓ Removed scope identifiers")
+
+            processed_yaml = qualify_template_refs(processed_yaml, 'account')
+            logger.info(f"  ✓ Qualified template references")
+
+            processed_yaml = add_template_tags(
+                processed_yaml,
+                {"promoted_from": source_version, "promotion_type": "stable"}
+            )
+            logger.info(f"  ✓ Added tracking tags")
+
+            # Set versionLabel to "stable"
+            processed_yaml = update_template_version_label(processed_yaml, "stable")
+            logger.info(f"  ✓ Updated versionLabel to stable")
+
+            # CRITICAL: Remove versionLabel from all child template references
+            processed_yaml = remove_child_template_version_labels(processed_yaml)
+            logger.info(f"  ✓ Removed versionLabel from child template references")
+
+            # Update child template versions if version_mapping provided (bulk stable)
+            if version_mapping:
+                # For stable, we actually want to REMOVE labels, not update them
+                # version_mapping in this case tells us which templates are being promoted together
+                pass  # Already removed above
+
+            # Sanitize template
+            processed_yaml_str = yaml.dump(processed_yaml, default_flow_style=False, sort_keys=False)
+            sanitized_yaml_str = sanitize_template(processed_yaml_str)
+            processed_yaml = yaml.safe_load(sanitized_yaml_str)
+            logger.info(f"  ✓ Sanitized template")
+
+            # Step 6: Write stable.yaml file
+            logger.info("")
+            logger.info(f"Step 6: Writing stable.yaml file...")
+            file_path = _save_template_file(
+                processed_yaml,
+                template_type,
+                template_id,
+                "stable",
+                self.config.output_dir
+            )
+
+            # Step 7: Update versions.yaml with stable label
+            logger.info("")
+            logger.info(f"Step 7: Updating versions.yaml...")
+            self.versions_manager.update_stable_label(
+                template_type=template_type,
+                identifier=template_id,
+                source_version=source_version
+            )
+
+            # Prepare outputs
+            outputs = {
+                "template_id": template_id,
+                "source_version": source_version,
+                "target_tier": "stable",
+                "file_path": str(file_path),
+                "promotion_status": "success"
+            }
+
+            # Done
+            logger.info("")
+            logger.info("=" * 60)
+            logger.info("✅ STABLE PROMOTION COMPLETED SUCCESSFULLY")
+            logger.info("=" * 60)
+
+            return PluginResult(
+                success=True,
+                message=f"Promoted {template_id} from {source_version} to stable",
+                outputs=outputs
+            )
+
+        except Exception as e:
+            logger.error(f"Stable promotion failed: {e}", exc_info=True)
+            return PluginResult(
+                success=False,
+                message=f"Stable promotion failed: {str(e)}",
+                outputs={},
+                error=str(e)
+            )
+
 
 def _execute_combined_mode(client, config) -> PluginResult:
     """Execute combined mode: extract then promote.
 
     Args:
-        client: HarnessAPIClient instance
+        client: HarnessClient instance
         config: PluginConfig instance
 
     Returns:
@@ -1058,13 +1326,15 @@ def _execute_combined_mode(client, config) -> PluginResult:
         for tmpl in tree_data:
             templates_to_promote.append({
                 "template_id": tmpl["identifier"],
-                "template_type": tmpl["template_type"]
+                "template_type": tmpl["template_type"],
+                "source_version": tmpl["version"]  # Track source version from extraction
             })
     else:
         # Single mode - just one template
         templates_to_promote.append({
             "template_id": config.template_id,
-            "template_type": extract_result.outputs.get("template_type", "stage")
+            "template_type": extract_result.outputs.get("template_type", "stage"),
+            "source_version": extract_result.outputs.get("template_version", "v1")  # Track source version
         })
 
     logger.info(f"Promoting {len(templates_to_promote)} template(s) to tier-{config.to_tier}...")
@@ -1091,6 +1361,8 @@ def _execute_combined_mode(client, config) -> PluginResult:
         # Create temp config for this template
         temp_config = config.model_copy()
         temp_config.template_id = template_id
+        # Set source_version from extraction result
+        temp_config.source_version = tmpl.get("source_version")
 
         # Run promotion with version_mapping
         temp_promoter = TemplatePromoter(client, temp_config)
@@ -1143,6 +1415,215 @@ def _execute_combined_mode(client, config) -> PluginResult:
     )
 
 
+def _execute_bulk_promotion(client, config) -> PluginResult:
+    """Execute bulk promotion: promote all templates at source tier to target tier or stable.
+
+    Args:
+        client: HarnessClient instance
+        config: PluginConfig instance
+
+    Returns:
+        PluginResult with bulk promotion outputs
+    """
+    logger.info("")
+    logger.info("=" * 60)
+    if config.to_tier == "stable":
+        logger.info("BULK STABLE PROMOTION MODE: PROMOTE ALL TO STABLE")
+    else:
+        logger.info("BULK PROMOTION MODE: PROMOTE ALL AT TIER")
+    logger.info("=" * 60)
+
+    target_tier = config.to_tier
+
+    # Determine source tier
+    # versions.yaml should be alongside templates/ directory, not inside it
+    versions_file = Path(config.output_dir).parent / "versions.yaml"
+    versions_manager = VersionsManager(str(versions_file))
+
+    # Handle stable promotion
+    if target_tier == "stable":
+        # For stable, we need to find all templates at their highest tier
+        if config.source_version:
+            source_version = config.source_version
+            logger.info(f"Source version (from config): {source_version}")
+        else:
+            # For bulk stable, we'll find each template's highest tier individually
+            source_version = None
+            logger.info("Auto-detect mode: Will find highest tier for each template")
+
+    # If source_version provided for tier promotion, use it
+    elif config.source_version:
+        source_version = config.source_version
+        logger.info(f"Source version (from config): {source_version}")
+    else:
+        # Auto-detect: source is tier-(target-1)
+        if target_tier == 1:
+            logger.error("Cannot bulk promote to tier-1. Use extraction mode or specify source_version.")
+            return PluginResult(
+                success=False,
+                message="Bulk promotion to tier-1 requires extraction from execution",
+                outputs={},
+                error="Invalid tier for bulk promotion"
+            )
+
+        source_tier = target_tier - 1
+        source_version = f"tier-{source_tier}"
+        logger.info(f"Auto-detected source: {source_version} (tier-{source_tier} → tier-{target_tier})")
+
+    # Find all templates at source tier
+    logger.info("")
+    if target_tier == "stable":
+        logger.info(f"Finding all templates for stable promotion...")
+    else:
+        logger.info(f"Finding templates at {source_version}...")
+
+    # Read versions.yaml and find templates
+    all_templates_at_tier = []
+    data = versions_manager.load()
+
+    if target_tier == "stable" and not source_version:
+        # For bulk stable without explicit source: find highest tier for each template
+        for template_type, templates in data.get('templates', {}).items():
+            for identifier, metadata in templates.items():
+                tiers = metadata.get('tiers', {})
+                if tiers:
+                    # Find highest tier for this template
+                    tier_numbers = [
+                        int(label.replace('tier-', ''))
+                        for label in tiers.keys()
+                        if label.startswith('tier-')
+                    ]
+                    if tier_numbers:
+                        highest = max(tier_numbers)
+                        all_templates_at_tier.append({
+                            "template_id": identifier,
+                            "template_type": template_type,
+                            "current_tier": f"tier-{highest}"
+                        })
+    else:
+        # For specific source version: find all templates at that tier
+        for template_type, templates in data.get('templates', {}).items():
+            for identifier, metadata in templates.items():
+                # Check if this template has the source version in any tier
+                tiers = metadata.get('tiers', {})
+                for tier_label, tier_version in tiers.items():
+                    if tier_label == source_version:
+                        all_templates_at_tier.append({
+                            "template_id": identifier,
+                            "template_type": template_type,
+                            "current_tier": source_version
+                        })
+                        break  # Found it, move to next template
+
+    if not all_templates_at_tier:
+        msg = "No templates found for bulk stable promotion" if target_tier == "stable" else f"No templates found at {source_version}"
+        logger.warning(msg)
+        return PluginResult(
+            success=False,
+            message=f"{msg} in versions.yaml",
+            outputs={"templates_found": 0},
+            error="No templates to promote"
+        )
+
+    logger.info(f"Found {len(all_templates_at_tier)} template(s):")
+    for tmpl in all_templates_at_tier:
+        logger.info(f"  - {tmpl['template_type']}/{tmpl['template_id']} @ {tmpl['current_tier']}")
+
+    # Build version mapping for all templates being promoted
+    if target_tier == "stable":
+        # For stable, no version labels on child refs
+        version_mapping = None  # Will be handled by stable promotion logic
+    else:
+        tier_version = f"tier-{target_tier}"
+        version_mapping = {
+            tmpl["template_id"]: tier_version
+            for tmpl in all_templates_at_tier
+        }
+        logger.info(f"Version mapping: {version_mapping}")
+
+    # Promote each template
+    logger.info("")
+    if target_tier == "stable":
+        logger.info(f"Promoting {len(all_templates_at_tier)} template(s) to stable...")
+    else:
+        logger.info(f"Promoting {len(all_templates_at_tier)} template(s) to tier-{target_tier}...")
+
+    promoted_templates = []
+    failed_promotions = []
+
+    for tmpl in all_templates_at_tier:
+        template_id = tmpl["template_id"]
+        current_tier = tmpl["current_tier"]
+        logger.info("")
+        logger.info(f"Promoting {template_id} from {current_tier}...")
+
+        # Create temp config for this template
+        temp_config = config.model_copy()
+        temp_config.template_id = template_id
+
+        # For bulk stable with auto-detect, set source_version to this template's highest tier
+        if target_tier == "stable" and not config.source_version:
+            temp_config.source_version = current_tier
+
+        # Run promotion with version_mapping
+        temp_promoter = TemplatePromoter(client, temp_config)
+        promo_result = temp_promoter.promote(version_mapping=version_mapping)
+
+        if promo_result.success:
+            promoted_templates.append(template_id)
+            logger.info(f"  ✓ {template_id} promoted successfully")
+        else:
+            failed_promotions.append({
+                "template_id": template_id,
+                "error": promo_result.message
+            })
+            logger.warning(f"  ✗ {template_id} promotion failed: {promo_result.message}")
+
+    # Compile results
+    logger.info("")
+    logger.info("=" * 60)
+    if target_tier == "stable":
+        logger.info(f"✅ BULK STABLE PROMOTION COMPLETED")
+        logger.info(f"   Target: stable")
+    else:
+        logger.info(f"✅ BULK PROMOTION COMPLETED")
+        logger.info(f"   Source: {source_version}")
+        logger.info(f"   Target: tier-{target_tier}")
+    logger.info(f"   Promoted: {len(promoted_templates)} template(s)")
+    if failed_promotions:
+        logger.info(f"   Failed: {len(failed_promotions)} promotion(s)")
+    logger.info("=" * 60)
+
+    # Build outputs
+    target_display = "stable" if target_tier == "stable" else f"tier-{target_tier}"
+    outputs = {
+        "mode": "bulk_promotion",
+        "source_version": source_version if source_version else "auto-detected",
+        "target_tier": target_display,
+        "promoted_templates": promoted_templates,
+        "failed_promotions": failed_promotions,
+        "success_count": len(promoted_templates),
+        "failure_count": len(failed_promotions),
+        "templates_found": len(all_templates_at_tier)
+    }
+
+    success = len(failed_promotions) == 0
+    if success:
+        if target_tier == "stable":
+            message = f"Successfully promoted {len(promoted_templates)} template(s) to stable"
+        else:
+            message = f"Successfully promoted {len(promoted_templates)} template(s) from {source_version} to tier-{target_tier}"
+    else:
+        message = f"Promoted {len(promoted_templates)} template(s), failed {len(failed_promotions)}"
+
+    return PluginResult(
+        success=success,
+        message=message,
+        outputs=outputs,
+        error=None if success else f"{len(failed_promotions)} promotion(s) failed"
+    )
+
+
 def execute_plugin(config) -> PluginResult:
     """Main plugin execution logic.
 
@@ -1155,11 +1636,14 @@ def execute_plugin(config) -> PluginResult:
     try:
         logger.info("Initializing Harness client...")
 
-        # Initialize client
-        client = HarnessAPIClient(
-            account_id=config.account_id,
+        # Initialize client using SDK
+        # Strip /gateway suffix if present (SDK expects base URL without it)
+        base_url = config.endpoint.replace('/gateway', '').rstrip('/')
+
+        client = HarnessClient(
             api_key=config.api_key,
-            endpoint=config.endpoint
+            account_id=config.account_id,
+            base_url=base_url
         )
 
         logger.info(f"Client initialized for account: {config.account_id}")
@@ -1174,8 +1658,12 @@ def execute_plugin(config) -> PluginResult:
             else:
                 return extractor.extract_tree()
         elif mode == "promotion":
-            promoter = TemplatePromoter(client, config)
-            return promoter.promote()
+            # Check if bulk promotion (mode: tree) or single template
+            if config.mode == "tree":
+                return _execute_bulk_promotion(client, config)
+            else:
+                promoter = TemplatePromoter(client, config)
+                return promoter.promote()
         else:  # combined mode
             return _execute_combined_mode(client, config)
 

@@ -1,5 +1,6 @@
-# Harness SDK
-harness-python-sdk==1.0.5
+# Harness SDK - Using harness-python-api-sdk from base Docker image
+# The SDK is pre-installed in harnesssolutionfactory/harness-python-api-sdk base image
+# harness-python-sdk==1.0.5  # OLD SDK - not used
 
 # Configuration & Validation
 pydantic>=2.0.0
