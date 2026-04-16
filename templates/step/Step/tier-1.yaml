@@ -1,0 +1,21 @@
+template:
+  name: Step
+  type: Step
+  spec:
+    type: ShellScript
+    spec:
+      shell: Bash
+      executionTarget: {}
+      source:
+        type: Inline
+        spec:
+          script: echo 1000
+      environmentVariables: []
+      outputVariables: []
+      delegateSelectors: []
+    timeout: 10m
+  identifier: Step
+  versionLabel: tier-1
+  tags:
+    promoted_from: v1
+    tier: tier-1
