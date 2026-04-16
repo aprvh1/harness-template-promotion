@@ -848,8 +848,25 @@ class TemplatePromoter:
             logger.info(f"Step 3: Fetching template from Harness...")
             logger.info(f"  Fetching {template_id} @ {source_version}")
 
-            # Create account-level scope (templates are promoted at account level)
-            scope = Scope(account_id=self.config.account_id)
+            # Determine scope based on whether we have execution_url with org/project
+            if self.config.execution_url:
+                # Parse scope from execution URL
+                url_parts = parse_execution_url(self.config.execution_url)
+                scope = Scope(
+                    account_id=url_parts['account_id'],
+                    org=url_parts['org'],
+                    project=url_parts['project']
+                )
+            elif self.config.project_id:
+                # Use config project_id (assume org is 'default' if not specified)
+                scope = Scope(
+                    account_id=self.config.account_id,
+                    org=self.config.org_id or 'default',
+                    project=self.config.project_id
+                )
+            else:
+                # Fall back to account-level scope
+                scope = Scope(account_id=self.config.account_id)
 
             template_data = self.client.templates.get(
                 template_id,
