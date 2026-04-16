@@ -45,6 +45,14 @@ RUNTIME_INPUT_FIELDS = [
     'dockerConfigJsonRef',
 ]
 
+# Fields that should NEVER be sanitized (script content, commands)
+SCRIPT_CONTENT_FIELDS = [
+    'script',      # Inline script content
+    'command',     # Shell command content
+    'commands',    # List of commands
+    'scriptString', # Alternative script field
+]
+
 # Expression patterns that reference environment-specific values
 ENV_SPECIFIC_EXPRESSIONS = [
     r'<\+secrets\.getValue\(["\']([^"\']+)["\']\)>',  # Secrets
@@ -106,6 +114,11 @@ def sanitize_value(key: str, value: Any, parent_keys: List[str] = None) -> Any:
     """
     if parent_keys is None:
         parent_keys = []
+
+    # IMPORTANT: Skip script content fields - never sanitize actual scripts/commands
+    if key in SCRIPT_CONTENT_FIELDS:
+        logger.debug(f"Skipping script content field: {key}")
+        return value
 
     # Handle None values
     if value is None:

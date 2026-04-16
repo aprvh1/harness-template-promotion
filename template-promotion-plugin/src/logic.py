@@ -28,6 +28,7 @@ from utils import (
     update_template_version_label,
     update_child_template_versions,
 )
+from sanitize_template import sanitize_template
 from versions_manager import VersionsManager
 
 
@@ -506,6 +507,13 @@ class TemplateExtractor:
             })
             logger.info("  ✓ Added tracking tags")
 
+            # Sanitize template (convert secrets/connectors to runtime inputs)
+            logger.info("  Sanitizing template (connectors, secrets → <+input>)...")
+            template_yaml_str = yaml.dump(template_yaml, default_flow_style=False, sort_keys=False)
+            sanitized_yaml_str = sanitize_template(template_yaml_str)
+            template_yaml = yaml.safe_load(sanitized_yaml_str)
+            logger.info("  ✓ Template sanitized (scripts preserved)")
+
             if self.config.verbose:
                 logger.info(f"\n📋 FINAL PROCESSED TEMPLATE YAML:")
                 final_yaml_str = yaml.dump(template_yaml, default_flow_style=False, sort_keys=False)
@@ -623,6 +631,12 @@ class TemplateExtractor:
                     'template_type': tmpl.type
                 })
                 logger.info("  ✓ Processed (removed scopes, qualified refs, added tags)")
+
+                # Sanitize template (convert secrets/connectors to runtime inputs)
+                template_yaml_str_for_sanitize = yaml.dump(template_yaml, default_flow_style=False, sort_keys=False)
+                sanitized_yaml_str = sanitize_template(template_yaml_str_for_sanitize)
+                template_yaml = yaml.safe_load(sanitized_yaml_str)
+                logger.info("  ✓ Sanitized (connectors, secrets → <+input>, scripts preserved)")
 
                 if self.config.verbose:
                     logger.info(f"\n  📋 PROCESSED YAML ({tmpl.identifier}):")
@@ -883,6 +897,12 @@ class TemplatePromoter:
             if version_mapping:
                 processed_yaml = update_child_template_versions(processed_yaml, version_mapping)
                 logger.info(f"  ✓ Updated child template versions")
+
+            # Sanitize template (convert secrets/connectors to runtime inputs)
+            processed_yaml_str = yaml.dump(processed_yaml, default_flow_style=False, sort_keys=False)
+            sanitized_yaml_str = sanitize_template(processed_yaml_str)
+            processed_yaml = yaml.safe_load(sanitized_yaml_str)
+            logger.info(f"  ✓ Sanitized (connectors, secrets → <+input>, scripts preserved)")
 
             # Step 5: Write tier file
             logger.info("")
