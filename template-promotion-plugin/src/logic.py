@@ -81,6 +81,58 @@ def _get_template_file_path(
     return Path(output_dir) / template_type / identifier / f"{version}.yaml"
 
 
+def _determine_template_type(
+    template_id: str,
+    versions_manager: Any,
+    output_dir: str,
+    templates_api: TemplatesApi = None,
+    scope: Scope = None
+) -> str:
+    """Determine template type by checking versions.yaml or directories.
+
+    Args:
+        template_id: Template identifier
+        versions_manager: VersionsManager instance
+        output_dir: Output directory path
+        templates_api: Optional TemplatesApi for fetching from Harness
+        scope: Optional Scope for Harness fetch
+
+    Returns:
+        Template type (step, stepgroup, stage, pipeline)
+    """
+    # Strategy 1: Check versions.yaml
+    for possible_type in ['step', 'stepgroup', 'stage', 'pipeline']:
+        if versions_manager.has_template(possible_type, template_id):
+            logger.debug(f"Found {template_id} in versions.yaml as type: {possible_type}")
+            return possible_type
+
+    # Strategy 2: Check local file directories
+    output_path = Path(output_dir).resolve()
+    for possible_type in ['step', 'stepgroup', 'stage', 'pipeline']:
+        template_dir = output_path / possible_type / template_id
+        if template_dir.exists() and list(template_dir.glob('*.yaml')):
+            logger.debug(f"Found {template_id} in local directory as type: {possible_type}")
+            return possible_type
+
+    # Strategy 3: Fetch from Harness (if API provided)
+    if templates_api and scope:
+        try:
+            # Try to fetch with stable version to get type
+            template_data = templates_api.get(template_id, "stable", scope)
+            if template_data and 'yaml' in template_data:
+                template_yaml = yaml.safe_load(template_data['yaml'])
+                template_type = template_yaml.get('template', {}).get('type', '').lower()
+                if template_type:
+                    logger.debug(f"Fetched {template_id} from Harness, type: {template_type}")
+                    return template_type
+        except Exception as e:
+            logger.debug(f"Could not fetch {template_id} from Harness: {e}")
+
+    # Default fallback
+    logger.warning(f"Could not determine type for {template_id}, defaulting to 'stage'")
+    return "stage"
+
+
 def _save_template_file(
     template_yaml: Dict,
     template_type: str,
@@ -839,11 +891,15 @@ class TemplatePromoter:
         Returns:
             Source version label or None
         """
-        # TODO: Get template type from config or fetch template first
-        # Current: Assumes "stage" - works for single-type repos
-        # Future: Support template_type in config or refactor to fetch before determine
-        template_type = "stage"
+        # Determine template type before querying versions
         identifier = self.config.template_id
+        template_type = _determine_template_type(
+            identifier,
+            self.versions_manager,
+            self.config.output_dir,
+            self.templates,
+            _parse_scope_from_config(self.config)
+        )
 
         # If source_version explicitly provided in config, use it
         if self.config.source_version:
@@ -992,27 +1048,36 @@ class TemplatePromoter:
             logger.info("")
             logger.info(f"Step 3: Fetching template from local or Harness...")
 
-            # Try to read from local file first (for locally promoted templates)
-            template_type = "stage"  # Will be updated from YAML
-            source_file = _get_template_file_path(
-                self.config.output_dir,
-                template_type,
-                template_id,
-                source_version
-            )
+            # Determine scope from config (needed for Harness fetch)
+            scope = _parse_scope_from_config(self.config)
 
-            if source_file.exists():
-                logger.info(f"  ✓ Found local file: {source_file}")
-                with open(source_file, 'r') as f:
-                    template_yaml_str = f.read()
-                template_yaml = yaml.safe_load(template_yaml_str)
-                # Get type from YAML
-                template_type = template_yaml.get('template', {}).get('type', 'Stage').lower()
-                logger.info(f"  ✓ Loaded from local file (type: {template_type})")
-            else:
-                # Determine scope from config
-                scope = _parse_scope_from_config(self.config)
+            # Try to find and read from local file first
+            # We need to check all possible type directories since we don't know the type yet
+            template_yaml_str = None
+            template_yaml = None
+            template_type = None
+            local_file_found = False
 
+            for possible_type in ['step', 'stepgroup', 'stage', 'pipeline']:
+                source_file = _get_template_file_path(
+                    self.config.output_dir,
+                    possible_type,
+                    template_id,
+                    source_version
+                )
+                if source_file.exists():
+                    logger.info(f"  ✓ Found local file: {source_file}")
+                    with open(source_file, 'r') as f:
+                        template_yaml_str = f.read()
+                    template_yaml = yaml.safe_load(template_yaml_str)
+                    # Get type from YAML (authoritative source)
+                    template_type = template_yaml.get('template', {}).get('type', '').lower()
+                    logger.info(f"  ✓ Loaded from local file (type: {template_type})")
+                    local_file_found = True
+                    break
+
+            if not local_file_found:
+                # Fetch from Harness
                 logger.info(f"  → Fetching from Harness ({template_id} @ {source_version})...")
                 template_data = self.templates.get(
                     template_id,
@@ -1032,9 +1097,11 @@ class TemplatePromoter:
                 template_yaml_str = template_data.get('yaml')
                 template_yaml = yaml.safe_load(template_yaml_str)
 
-                # Get template type from metadata or parsed YAML
-                template_type = template_data.get('templateEntityType', 'Stage').lower()
+                # ALWAYS get template type from parsed YAML, not from API metadata
+                # This ensures consistency with extraction logic
+                template_type = template_yaml.get('template', {}).get('type', '').lower()
                 logger.info(f"  ✓ Fetched from Harness (type: {template_type})")
+
             logger.info(f"  ✓ Fetched template (type: {template_type})")
 
             # Step 4: Process template (remove scopes, qualify refs, add tags, update versions)
@@ -1188,7 +1255,14 @@ class TemplatePromoter:
                 logger.info(f"  ✓ Using explicitly provided version: {source_version}")
             else:
                 # Auto-detect: use highest tier
-                template_type = "stage"  # TODO: Get actual type
+                # Determine template type first
+                template_type = _determine_template_type(
+                    template_id,
+                    self.versions_manager,
+                    self.config.output_dir,
+                    self.templates,
+                    scope
+                )
                 highest_tier = self.versions_manager.get_highest_tier(template_type, template_id)
                 if highest_tier:
                     source_version = f"tier-{highest_tier}"
@@ -1237,24 +1311,32 @@ class TemplatePromoter:
             logger.info("")
             logger.info(f"Step 4: Fetching template from local or Harness...")
 
-            # Try to read from local file first (for locally promoted templates)
-            template_type = "stage"  # Will be updated from YAML
-            source_file = _get_template_file_path(
-                self.config.output_dir,
-                template_type,
-                template_id,
-                source_version
-            )
+            # Try to find and read from local file first
+            # We need to check all possible type directories since we don't know the type yet
+            template_yaml_str = None
+            template_yaml = None
+            template_type = None
+            local_file_found = False
 
-            if source_file.exists():
-                logger.info(f"  ✓ Found local file: {source_file}")
-                with open(source_file, 'r') as f:
-                    template_yaml_str = f.read()
-                template_yaml = yaml.safe_load(template_yaml_str)
-                # Get type from YAML
-                template_type = template_yaml.get('template', {}).get('type', 'Stage').lower()
-                logger.info(f"  ✓ Loaded from local file (type: {template_type})")
-            else:
+            for possible_type in ['step', 'stepgroup', 'stage', 'pipeline']:
+                source_file = _get_template_file_path(
+                    self.config.output_dir,
+                    possible_type,
+                    template_id,
+                    source_version
+                )
+                if source_file.exists():
+                    logger.info(f"  ✓ Found local file: {source_file}")
+                    with open(source_file, 'r') as f:
+                        template_yaml_str = f.read()
+                    template_yaml = yaml.safe_load(template_yaml_str)
+                    # Get type from YAML (authoritative source)
+                    template_type = template_yaml.get('template', {}).get('type', '').lower()
+                    logger.info(f"  ✓ Loaded from local file (type: {template_type})")
+                    local_file_found = True
+                    break
+
+            if not local_file_found:
                 # Fetch from Harness
                 try:
                     # Try to fetch stable version first
@@ -1264,7 +1346,8 @@ class TemplatePromoter:
                     # Parse YAML
                     template_yaml_str = template_data.get('yaml')
                     template_yaml = yaml.safe_load(template_yaml_str)
-                    template_type = template_data.get('templateEntityType', 'Stage').lower()
+                    # ALWAYS get template type from parsed YAML, not from API metadata
+                    template_type = template_yaml.get('template', {}).get('type', '').lower()
                 except Exception as e:
                     # Fall back to source version
                     logger.warning(f"  ⚠️  Failed to fetch stable version: {e}")
@@ -1283,7 +1366,8 @@ class TemplatePromoter:
                     # Parse YAML
                     template_yaml_str = template_data.get('yaml')
                     template_yaml = yaml.safe_load(template_yaml_str)
-                    template_type = template_data.get('templateEntityType', 'Stage').lower()
+                    # ALWAYS get template type from parsed YAML, not from API metadata
+                    template_type = template_yaml.get('template', {}).get('type', '').lower()
 
             # Step 5: Process template
             logger.info("")
