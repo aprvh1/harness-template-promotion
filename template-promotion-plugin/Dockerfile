@@ -15,7 +15,7 @@ ENV PYTHONUNBUFFERED=1
 
 # Run as root to avoid permission issues with /harness directory
 # Files in /harness may be owned by root from previous runs
-USER 1000
+USER root
 
 # Run plugin directly with Python
 ENTRYPOINT ["python", "/plugin/src/main.py"]
