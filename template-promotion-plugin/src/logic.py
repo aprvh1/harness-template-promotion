@@ -683,8 +683,8 @@ class TemplateExtractor:
                 project=url_parts['project']
             )
 
-            # Validate execution (side effect: checks execution succeeded)
-            _ = self._validate_execution(url_parts['execution_id'], scope)
+            # Validate execution and get execution data for validations
+            exec_data = self._validate_execution(url_parts['execution_id'], scope)
 
             # Discover dependency tree
             logger.info("")
@@ -720,6 +720,20 @@ class TemplateExtractor:
                 if self.config.verbose:
                     logger.info(f"\n  📋 ORIGINAL YAML ({tmpl.identifier}):")
                     logger.info(f"  {template_yaml_str}")
+
+                # Run 4-level validation
+                logger.info("  Running 4-level validation...")
+                validations = self._run_validations(
+                    tmpl.identifier,
+                    template_yaml,
+                    exec_data['pipeline_yaml'],
+                    exec_data['execution_yaml']
+                )
+                logger.info(f"  ✓ Validation completed")
+
+                if self.config.verbose:
+                    logger.info(f"\n  📋 VALIDATION RESULTS ({tmpl.identifier}):")
+                    logger.info(f"  {yaml.dump(validations, default_flow_style=False)}")
 
                 # Process template
                 template_yaml = remove_scope_identifiers(template_yaml)
