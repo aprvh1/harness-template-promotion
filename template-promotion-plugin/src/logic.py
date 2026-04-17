@@ -129,22 +129,38 @@ def _save_template_file(
 
     file_path = template_dir / f"{version}.yaml"
 
-    # If file exists and is read-only, try to make it writable or remove it
+    # If file exists, check if we can write to it
     if file_path.exists():
+        file_stat = os.stat(file_path)
+        current_uid = os.getuid() if hasattr(os, 'getuid') else None
+
+        # Check if file is owned by someone else
+        if current_uid is not None and file_stat.st_uid != current_uid:
+            logger.warning(f"File {file_path} is owned by UID {file_stat.st_uid}, current user is UID {current_uid}")
+            logger.error(f"Cannot overwrite file owned by different user. Please clean /harness/templates directory or use a different output directory.")
+            logger.error(f"Suggestion: Set PLUGIN_OUTPUT_DIR=/harness/templates-{current_uid} or clean up between runs")
+            raise PermissionError(f"Cannot overwrite {file_path} owned by UID {file_stat.st_uid} (current user: {current_uid})")
+
+        # File is owned by us, make it writable
         try:
             os.chmod(file_path, 0o666)
             logger.debug(f"Made existing file writable: {file_path}")
-        except (PermissionError, OSError):
-            try:
-                os.remove(file_path)
-                logger.debug(f"Removed read-only file: {file_path}")
-            except (PermissionError, OSError) as e:
-                logger.warning(f"Cannot modify existing file {file_path}: {e}")
+        except (PermissionError, OSError) as e:
+            logger.warning(f"Cannot modify existing file {file_path}: {e}")
 
     # Try to write the file
     try:
-        with open(file_path, 'w') as f:
+        # Create file descriptor with proper permissions before opening
+        fd = os.open(file_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o666)
+        with os.fdopen(fd, 'w') as f:
             yaml.dump(template_yaml, f, sort_keys=False, default_flow_style=False)
+
+        # Explicitly set file permissions after writing (in case umask interfered)
+        try:
+            os.chmod(file_path, 0o666)
+        except (PermissionError, OSError):
+            pass  # Best effort
+
     except PermissionError as e:
         logger.error(f"Cannot write to {file_path}: {e}")
         logger.error(f"Directory permissions: {oct(os.stat(template_dir).st_mode)[-3:]}")
@@ -153,6 +169,7 @@ def _save_template_file(
             logger.error(f"File exists: True")
             logger.error(f"File permissions: {oct(os.stat(file_path).st_mode)[-3:]}")
             logger.error(f"File owner: {os.stat(file_path).st_uid if hasattr(os.stat(file_path), 'st_uid') else 'unknown'}")
+        logger.error(f"Container user: {os.getuid() if hasattr(os, 'getuid') else 'unknown'}")
         raise
 
     logger.info(f"  ✓ Saved to {file_path}")
