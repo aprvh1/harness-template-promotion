@@ -3,21 +3,22 @@ FROM harnesssolutionfactory/harness-python-api-sdk:latest
 
 WORKDIR /plugin
 
-# Copy requirements and plugin code
+# Copy requirements, plugin code, and entrypoint script
 COPY requirements.txt .
 COPY src/ ./src/
+COPY entrypoint.sh /entrypoint.sh
 
 # Install plugin dependencies directly in runtime image
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Create output directories with proper permissions
-RUN mkdir -p /plugin/templates && \
-    chmod -R 777 /plugin/templates && \
-    mkdir -p /plugin/output && \
-    chmod -R 777 /plugin/output
+# Create /harness directory with proper permissions (standard Harness writable location)
+# Users can set PLUGIN_OUTPUT_DIR to /harness/templates, /harness/output, etc.
+RUN mkdir -p /harness && \
+    chmod -R 777 /harness && \
+    chmod +x /entrypoint.sh
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 
-# Entrypoint
-ENTRYPOINT ["python", "/plugin/src/main.py"]
+# Use entrypoint script to fix permissions before running
+ENTRYPOINT ["/entrypoint.sh"]

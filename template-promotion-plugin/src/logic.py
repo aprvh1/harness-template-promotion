@@ -6,6 +6,7 @@ and dependency tree discovery.
 """
 
 import re
+import os
 import logging
 import yaml
 from typing import Dict, Any, Optional, List, Set, Tuple
@@ -101,12 +102,54 @@ def _save_template_file(
     Returns:
         Path to saved file
     """
-    template_dir = Path(output_dir) / template_type / identifier
-    template_dir.mkdir(parents=True, exist_ok=True)
+    # Use absolute path to avoid relative path issues
+    output_path = Path(output_dir).resolve()
+    template_dir = output_path / template_type / identifier
+
+    # Create directory with full permissions
+    try:
+        template_dir.mkdir(parents=True, exist_ok=True, mode=0o777)
+
+        # Explicitly set permissions on created directories
+        for dir_path in [output_path, output_path / template_type, template_dir]:
+            try:
+                os.chmod(dir_path, 0o777)
+            except (PermissionError, OSError):
+                # If we can't change permissions, log but continue
+                logger.debug(f"Could not set permissions on {dir_path}")
+    except PermissionError as e:
+        logger.error(f"Cannot create directory {template_dir}: {e}")
+        logger.error(f"Current user: {os.getuid() if hasattr(os, 'getuid') else 'unknown'}")
+        logger.error(f"Directory exists: {template_dir.exists()}, Parent exists: {template_dir.parent.exists()}")
+        raise
 
     file_path = template_dir / f"{version}.yaml"
-    with open(file_path, 'w') as f:
-        yaml.dump(template_yaml, f, sort_keys=False, default_flow_style=False)
+
+    # If file exists and is read-only, try to make it writable or remove it
+    if file_path.exists():
+        try:
+            os.chmod(file_path, 0o666)
+            logger.debug(f"Made existing file writable: {file_path}")
+        except (PermissionError, OSError):
+            try:
+                os.remove(file_path)
+                logger.debug(f"Removed read-only file: {file_path}")
+            except (PermissionError, OSError) as e:
+                logger.warning(f"Cannot modify existing file {file_path}: {e}")
+
+    # Try to write the file
+    try:
+        with open(file_path, 'w') as f:
+            yaml.dump(template_yaml, f, sort_keys=False, default_flow_style=False)
+    except PermissionError as e:
+        logger.error(f"Cannot write to {file_path}: {e}")
+        logger.error(f"Directory permissions: {oct(os.stat(template_dir).st_mode)[-3:]}")
+        logger.error(f"Directory owner: {os.stat(template_dir).st_uid if hasattr(os.stat(template_dir), 'st_uid') else 'unknown'}")
+        if file_path.exists():
+            logger.error(f"File exists: True")
+            logger.error(f"File permissions: {oct(os.stat(file_path).st_mode)[-3:]}")
+            logger.error(f"File owner: {os.stat(file_path).st_uid if hasattr(os.stat(file_path), 'st_uid') else 'unknown'}")
+        raise
 
     logger.info(f"  ✓ Saved to {file_path}")
     return file_path
