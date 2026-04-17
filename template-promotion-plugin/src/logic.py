@@ -107,16 +107,20 @@ def _save_template_file(
     template_dir = output_path / template_type / identifier
 
     # Create directory with full permissions
+    # Note: /harness is provided by Harness and is already writable
+    # We only create subdirectories under it (e.g., /harness/templates/stage/Stage_Template/)
     try:
         template_dir.mkdir(parents=True, exist_ok=True, mode=0o777)
 
-        # Explicitly set permissions on created directories
-        for dir_path in [output_path, output_path / template_type, template_dir]:
+        # Only set permissions on the directory we just created, not parent paths
+        # This avoids trying to chmod /harness or /harness/templates which Harness manages
+        if template_dir.exists():
             try:
-                os.chmod(dir_path, 0o777)
-            except (PermissionError, OSError):
+                os.chmod(template_dir, 0o777)
+            except (PermissionError, OSError) as e:
                 # If we can't change permissions, log but continue
-                logger.debug(f"Could not set permissions on {dir_path}")
+                # This is normal if running in read-only filesystem
+                logger.debug(f"Could not set permissions on {template_dir}: {e}")
     except PermissionError as e:
         logger.error(f"Cannot create directory {template_dir}: {e}")
         logger.error(f"Current user: {os.getuid() if hasattr(os, 'getuid') else 'unknown'}")
