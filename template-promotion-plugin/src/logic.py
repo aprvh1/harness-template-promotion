@@ -349,12 +349,22 @@ class TemplateExtractor:
 
         logger.info(f"Fetching pipeline: {pipeline_id}")
         pipeline = self.templates.get_pipeline(pipeline_id, scope)
-        pipeline_yaml = pipeline.get('yamlPipeline', '')
+        pipeline_yaml = pipeline.get('yaml_pipeline', '')  # SDK returns snake_case after to_dict()
 
         # Get execution YAML
         logger.info("Fetching execution YAML...")
         exec_metadata = self.templates.get_execution_metadata(execution_id, scope)
-        execution_yaml = exec_metadata.get('executionYaml', '')
+
+        # Debug: Check what's actually in the response
+        if self.config.verbose:
+            logger.info(f"exec_metadata keys: {list(exec_metadata.keys()) if isinstance(exec_metadata, dict) else 'not a dict'}")
+
+        # Try to get execution_yaml (SDK returns snake_case keys after to_dict())
+        execution_yaml = exec_metadata.get('execution_yaml', '')
+        if not execution_yaml and 'data' in exec_metadata:
+            execution_yaml = exec_metadata.get('data', {}).get('execution_yaml', '')
+            if self.config.verbose:
+                logger.info(f"Found execution_yaml under 'data' key")
 
         return {
             "execution": execution,
