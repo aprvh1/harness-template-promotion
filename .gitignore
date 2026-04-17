@@ -130,3 +130,8 @@ node_modules/
 
 templates/*
 terraform/control-workspace/terraform.tfvars
+
+# Testing - never commit test results or credentials
+testing/results/
+testing/test-config.env
+testing/**/*.log
