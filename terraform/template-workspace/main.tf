@@ -31,10 +31,11 @@ locals {
   template_versions = {
     for filename in local.template_files :
     trimsuffix(filename, ".yaml") => {
-      version       = trimsuffix(filename, ".yaml")  # v1, tier-1, tier-2, etc.
+      version       = trimsuffix(filename, ".yaml")  # v1, tier-1, tier-2, stable, etc.
       yaml_path     = "${local.template_dir}/${filename}"
       yaml_content  = yamldecode(file("${local.template_dir}/${filename}"))
-      is_stable     = trimsuffix(filename, ".yaml") == "tier-5"
+      # Mark as stable if filename is "stable.yaml"
+      is_stable     = trimsuffix(filename, ".yaml") == "stable"
     }
   }
 
@@ -61,9 +62,9 @@ resource "harness_platform_template" "versions" {
   # Template identification
   name = var.template_identifier
   identifier = var.template_identifier
-  version    = each.value.version  # v1, tier-1, tier-2, etc.
+  version    = each.value.version  # v1, tier-1, tier-2, stable, etc.
 
-  # Mark tier-5 as stable
+  # Mark as stable if version is "stable" (from stable.yaml)
   is_stable = each.value.is_stable
 
   # Template YAML content
