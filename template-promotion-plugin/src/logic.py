@@ -101,8 +101,10 @@ def _determine_template_type(
         Template type (step, stepgroup, stage, pipeline)
     """
     # Strategy 1: Check versions.yaml
+    versions_data = versions_manager.load()
+    templates_by_type = versions_data.get('templates', {})
     for possible_type in ['step', 'stepgroup', 'stage', 'pipeline']:
-        if versions_manager.has_template(possible_type, template_id):
+        if template_id in templates_by_type.get(possible_type, {}):
             logger.debug(f"Found {template_id} in versions.yaml as type: {possible_type}")
             return possible_type
 
@@ -939,9 +941,12 @@ class TemplatePromoter:
         Returns:
             (is_valid, error_message)
         """
-        # Check if this is a rollback (re-promotion to existing tier)
-        if template_id:
-            # Try to find the target file (check all template types)
+        # Check if this is an idempotent re-promotion or valid rollback scenario
+        # Only bypass validation for these specific cases:
+        # 1. Same-tier promotion (will be validated below but allowed)
+        # 2. Rollback from stable (stable → any tier is always allowed)
+        if template_id and source_version == "stable":
+            # Rollback from stable is always allowed
             for tmpl_type in TEMPLATE_TYPES:
                 target_file = _get_template_file_path(
                     self.config.output_dir,
@@ -950,29 +955,50 @@ class TemplatePromoter:
                     f"tier-{target_tier}"
                 )
                 if target_file.exists():
-                    logger.info(f"  ℹ️  Rollback detected: tier-{target_tier} already exists, re-promoting with {source_version}")
+                    logger.info(f"  ℹ️  Rollback from stable: tier-{target_tier} already exists, re-promoting from stable")
                     return True, ""
 
         # Rule 1: Semantic versions (v1, v2) can only go to tier-1
+        # This prevents skipping tier-1 (e.g., v1 → tier-2)
         if source_version.startswith('v') and target_tier != 1:
-            return False, f"Semantic version {source_version} can only promote to tier-1, not tier-{target_tier}"
+            return False, (
+                f"Semantic version {source_version} must promote to tier-1 first. "
+                f"Cannot skip directly to tier-{target_tier}. "
+                f"Promote to tier-1, then tier-1 → tier-{target_tier}."
+            )
 
-        # Rule 2: tier-N can only go to tier-N+1 (unless tier_skip enabled or rollback)
+        # Rule 2: tier-N can only go to tier-N+1 (unless tier_skip enabled)
         if source_version.startswith('tier-'):
             source_tier = int(source_version.replace('tier-', ''))
 
-            # Allow same-tier (rollback scenario)
+            # Rule 2a: Detect same-tier promotion (no-op)
             if target_tier == source_tier:
-                logger.info(f"  ℹ️  Same-tier promotion detected (rollback/re-promotion)")
+                logger.warning(
+                    f"⚠️  Same-tier promotion detected: {source_version} → tier-{target_tier}. "
+                    f"This is a no-op operation (source and target are identical). "
+                    f"Allowing as idempotent operation."
+                )
                 return True, ""
 
-            # Check backwards (tier-3 → tier-2 without explicit source_version)
+            # Rule 2b: Block backwards promotion (tier-N → tier-M where M < N)
             if target_tier < source_tier:
-                return False, f"Cannot promote backwards from {source_version} to tier-{target_tier}. For rollback, specify PLUGIN_SOURCE_VERSION explicitly."
+                return False, (
+                    f"Backwards promotion not allowed: {source_version} → tier-{target_tier}. "
+                    f"Tiers must progress forward (tier-{source_tier} can only promote to tier-{source_tier+1} or higher). "
+                    f"If you need to rollback, promote from 'stable' or an earlier tier explicitly."
+                )
 
-            # Check skip (only if not backwards or same)
-            if not tier_skip and target_tier != source_tier + 1:
-                return False, f"{source_version} can only promote to tier-{source_tier + 1} (enable tier_skip to skip)"
+            # Rule 2c: Enforce tier skip flag for ANY gap > 1
+            tier_gap = target_tier - source_tier
+            if tier_gap > 1 and not tier_skip:
+                skipped_tiers = list(range(source_tier + 1, target_tier))
+                return False, (
+                    f"Cannot skip {tier_gap - 1} tier(s) without TIER_SKIP flag. "
+                    f"Attempting to skip: tier-{', tier-'.join(map(str, skipped_tiers))}. "
+                    f"Either: "
+                    f"(1) Promote sequentially: tier-{source_tier} → tier-{source_tier + 1} → ... → tier-{target_tier}, or "
+                    f"(2) Set TIER_SKIP=true to allow skipping intermediate tiers."
+                )
 
         return True, ""
 
@@ -1297,15 +1323,13 @@ class TemplatePromoter:
                 scope = Scope(account_id=self.config.account_id)
             logger.info(f"  ✓ Scope: account={scope.account}, org={scope.org}, project={scope.project}")
 
-            # Step 3: Mark version as stable in Harness using SDK
+            # Step 3: Skip Harness API call for marking stable
+            # The stable marking is controlled via Terraform/IaCM (is_stable = true in harness_platform_template)
+            # Plugin only creates the local stable.yaml file for deployment
             logger.info("")
-            logger.info(f"Step 3: Marking {source_version} as stable in Harness...")
-            try:
-                self.templates.mark_stable(template_id, source_version, scope)
-                logger.info(f"  ✓ Successfully marked {template_id}@{source_version} as stable")
-            except Exception as e:
-                logger.warning(f"  ⚠️  Failed to mark as stable in Harness: {e}")
-                logger.warning(f"  ⚠️  Continuing with local stable.yaml creation...")
+            logger.info(f"Step 3: Skipping Harness API call for marking stable...")
+            logger.info(f"  ℹ️  Stable marking will be controlled via Terraform/IaCM")
+            logger.info(f"  ℹ️  Set 'is_stable = true' in harness_platform_template resource")
 
             # Step 4: Fetch the template - try local file first, then Harness
             logger.info("")
